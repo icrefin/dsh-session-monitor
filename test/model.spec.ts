@@ -1,0 +1,448 @@
+/**
+ * The monitor's two pure derivations: which sessions it watches, and what one
+ * live event window says happened.
+ *
+ * These tests drive the real functions with shaped fixtures; no browser, no
+ * harness, and no mock of the harness — the point is that the derivations hold
+ * for the payloads the Session Controller actually publishes.
+ *
+ * @module dsh-session-monitor/test/model
+ */
+
+import { describe, expect, it } from 'vitest'
+import {
+  autoColumns,
+  DEFAULT_MAX_CARDS,
+  deriveTranscript,
+  displayOrder,
+  displayPresetName,
+  gridRows,
+  needsPermissionConfirmation,
+  permissionLabelKey,
+  newestEventTime,
+  reconcileBudget,
+  reconcileOrder,
+  relativeLabel,
+  selectMonitored,
+  sessionTitle,
+  summarizeArguments,
+  workspaceTitles,
+  type TranscriptRow,
+} from '../src/client/model.ts'
+import type { EventEntryLike, SessionListSnapshotLike, SessionStatusLike } from '../src/client/types.ts'
+
+/** Wrap one durable event as the Session binding's window entry. */
+function event(type: string, seq: number, data: unknown, time = seq): EventEntryLike {
+  return { type: 'event', event: { type, seq, time, data } }
+}
+
+/** A minimal catalog row. */
+function row(id: string, overrides: Partial<Record<string, unknown>> = {}): Record<string, unknown> {
+  return {
+    id,
+    displayTitle: `Session ${id}`,
+    title: `Session ${id}`,
+    running: false,
+    blank: false,
+    updatedAt: 1_000,
+    cwd: `/work/${id}`,
+    ...overrides,
+  }
+}
+
+/** Build a catalog snapshot from rows, in the given order. */
+function catalog(rows: readonly Record<string, unknown>[]): SessionListSnapshotLike {
+  const byId: Record<string, never> = {}
+  for (const entry of rows) (byId as Record<string, unknown>)[String(entry.id)] = entry
+  return { ids: rows.map((entry) => String(entry.id)), byId: byId as never, phase: 'ready' }
+}
+
+/** Extract only the transcript row kinds, ordered. */
+function kinds(rows: readonly TranscriptRow[]): string[] {
+  return rows.map((entry) => entry.kind)
+}
+
+describe('newestEventTime', () => {
+  it('returns the newest event time, including transient rows', () => {
+    expect(newestEventTime(undefined)).toBe(0)
+    expect(newestEventTime([])).toBe(0)
+    expect(
+      newestEventTime([
+        { type: 'event', event: { type: 'user/message', seq: 1, time: 10, data: {} } },
+        { type: 'transient', event: { type: 'assistant/live-chunk', seq: 2, time: 30, data: {} } },
+        { type: 'event', event: { type: 'tool/call', seq: 3, time: 20, data: {} } },
+        { type: 'event', event: { type: 'tool/result' } },
+      ]),
+    ).toBe(30)
+  })
+})
+
+describe('grid fit', () => {
+  it('fits cards into the box with balanced columns', () => {
+    // Wide, short box with nine cards: three columns keep the cells usable.
+    expect(autoColumns(9, 1100, 700)).toBe(3)
+    // Two cards side by side are wider than stacked alternatives.
+    expect(autoColumns(2, 1100, 700)).toBe(2)
+    // A tall narrow box stacks instead of squeezing.
+    expect(autoColumns(4, 320, 900)).toBe(1)
+    // Never more columns than cards, and never past the ceiling.
+    expect(autoColumns(1, 1200, 600)).toBe(1)
+    expect(autoColumns(20, 2400, 600)).toBeLessThanOrEqual(6)
+  })
+
+  it('never asks for fewer than one row', () => {
+    expect(gridRows(0, 3)).toBe(1)
+    expect(gridRows(1, 3)).toBe(1)
+    expect(gridRows(7, 3)).toBe(3)
+    expect(gridRows(6, 0)).toBe(6)
+  })
+})
+
+describe('sessionTitle', () => {
+  it('prefers the projected title, then the display title, then the path', () => {
+    expect(sessionTitle({ id: 'a', title: 'Titled', displayTitle: 'Display' })).toBe('Titled')
+    expect(sessionTitle({ id: 'a', displayTitle: 'Display' })).toBe('Display')
+    expect(sessionTitle({ id: 'a', cwd: '/Users/me/workspace/project' })).toBe('workspace/project')
+    expect(sessionTitle({ id: 'abcdef123456' })).toBe('abcdef12')
+  })
+
+  it('ignores a whitespace-only title', () => {
+    expect(sessionTitle({ id: 'a', title: '   ', displayTitle: 'Real' })).toBe('Real')
+  })
+})
+
+describe('selectMonitored', () => {
+  it('orders waiting first, then running, then recency', () => {
+    const list = catalog([
+      row('old', { updatedAt: 10 }),
+      row('busy', { running: true, updatedAt: 5 }),
+      row('fresh', { updatedAt: 900 }),
+      row('asked', { running: true, updatedAt: 1 }),
+    ])
+    const statuses = new Map<string, SessionStatusLike>([
+      ['asked', { running: true, pendingInteraction: { kind: 'question', sessionId: 'asked' } }],
+    ])
+    const picked = selectMonitored(list, statuses, new Set(), 9)
+    expect(picked.map((entry) => entry.id)).toEqual(['asked', 'busy', 'fresh', 'old'])
+    expect(picked[0]?.state).toBe('waiting')
+    expect(picked[1]?.state).toBe('running')
+  })
+
+  it('drops blank sessions, subagent children and removed ids', () => {
+    const list = catalog([
+      row('blank', { blank: true }),
+      row('child', { parentId: 'parent', origin: 'subagent' }),
+      row('gone'),
+      row('keep'),
+    ])
+    const picked = selectMonitored(list, undefined, new Set(['gone']), 9)
+    expect(picked.map((entry) => entry.id)).toEqual(['keep'])
+  })
+
+  it('keeps a waiting session even when the card budget is exhausted', () => {
+    const rows = [row('asked'), row('a1'), row('a2'), row('a3')]
+    const statuses = new Map<string, SessionStatusLike>([
+      ['asked', { pendingInteraction: { kind: 'approval' } }],
+    ])
+    const picked = selectMonitored(catalog(rows), statuses, new Set(), 1)
+    expect(picked.map((entry) => entry.id)).toEqual(['asked', 'a1'])
+  })
+
+  it('clamps the budget to the supported range', () => {
+    const rows = Array.from({ length: 40 }, (_, index) => row(`s${index}`))
+    const picked = selectMonitored(catalog(rows), undefined, new Set(), 999)
+    // 16 is the hard ceiling; waiting sessions are none, so the budget applies.
+    expect(picked.length).toBe(16)
+    expect(DEFAULT_MAX_CARDS).toBeLessThanOrEqual(16)
+  })
+
+  it('labels each card with its Workspace title, falling back to the path', () => {
+    const list = catalog([
+      row('a', { cwd: '/work/project-a' }),
+      row('b', { cwd: '/work/project-b' }),
+    ])
+    const picked = selectMonitored(list, undefined, new Set(), 9, [
+      { workspaceId: 'w1', title: 'Release notes', sessionIds: ['a'] },
+      { workspaceId: 'w2', title: '  ', sessionIds: ['b'] },
+    ])
+    expect(picked.find((entry) => entry.id === 'a')?.workspace).toBe('Release notes')
+    expect(picked.find((entry) => entry.id === 'b')?.workspace).toBe('work/project-b')
+  })
+
+  it('maps only titled Workspaces that list their members', () => {
+    expect([...workspaceTitles([
+      { title: 'Alpha', sessionIds: ['a', 'b'] },
+      { title: '', sessionIds: ['c'] },
+      { title: 'No members' },
+    ])]).toEqual([['a', 'Alpha'], ['b', 'Alpha']])
+    expect(workspaceTitles(undefined).size).toBe(0)
+  })
+
+  it('returns nothing without a catalog', () => {
+    expect(selectMonitored(undefined, undefined, new Set(), 9)).toEqual([])
+  })
+})
+
+describe('deriveTranscript', () => {
+  it('keeps human turns and drops injected context', () => {
+    const entries: EventEntryLike[] = [
+      event('user/message', 1, { content: [{ type: 'text', text: 'hello' }], source: { kind: 'user' } }),
+      event('user/message', 2, { content: [{ type: 'text', text: 'hidden' }], source: { kind: 'runtime-context' } }),
+      event('user/message', 3, { content: [{ type: 'text', text: 'answered' }], source: { kind: 'user-question-reply' } }),
+      event('user/message', 4, { content: [{ type: 'text', text: 'seeded' }] }),
+    ]
+    const rows = deriveTranscript(entries)
+    const users = rows.filter((entry): entry is Extract<TranscriptRow, { kind: 'user' }> => entry.kind === 'user')
+    expect(users.map((entry) => entry.text)).toEqual(['hello', 'answered', 'seeded'])
+  })
+
+  it('merges a tool call with its result and marks failures', () => {
+    const entries: EventEntryLike[] = [
+      event('tool/call', 10, { callId: 'c1', name: 'bash', arguments: '{"command":"ls","description":"list"}' }),
+      event('tool/call', 11, { callId: 'c2', name: 'read', arguments: 'not json' }),
+      event('tool/result', 12, { toolCallId: 'c1', message: { content: [{ type: 'text', text: 'ok output' }] } }),
+      event('tool/result', 13, {
+        toolCallId: 'c2',
+        message: { content: [{ type: 'text', text: 'boom' }], isError: true },
+      }),
+    ]
+    const rows = deriveTranscript(entries)
+    expect(rows).toHaveLength(2)
+    const [first, second] = rows
+    expect(first?.kind).toBe('tool')
+    expect(second?.kind).toBe('tool')
+    if (first?.kind !== 'tool' || second?.kind !== 'tool') throw new Error('unreachable')
+    expect(first.name).toBe('bash')
+    expect(first.detail).toContain('command=ls')
+    expect(first.status).toBe('done')
+    expect(second.status).toBe('error')
+    expect(second.detail).toBe('boom')
+  })
+
+  it('accumulates streamed text deltas into one live row', () => {
+    const live = (seq: number, text: string): EventEntryLike => ({
+      type: 'transient',
+      event: {
+        type: 'assistant/live-chunk',
+        seq,
+        time: seq,
+        data: { attemptId: 'a1', turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text } },
+      },
+    })
+    const rows = deriveTranscript([live(1, 'Hel'), live(2, 'lo'), live(3, '!')])
+    expect(rows).toHaveLength(1)
+    const [only] = rows
+    if (only?.kind !== 'assistant') throw new Error('unreachable')
+    expect(only.text).toBe('Hello!')
+    expect(only.live).toBe(true)
+  })
+
+  it('keeps a long message whole instead of clipping it', () => {
+    // 5,000 characters: the card scrolls, so the row must not swallow the rest
+    // of the answer behind an ellipsis.
+    const phrase = '- I cannot find the code that '
+    const long = `${'a'.repeat(2_499)}${phrase}${'b'.repeat(5_000 - 2_499 - phrase.length)}`
+    expect(long.length).toBe(5_000)
+    const rows = deriveTranscript([
+      event('assistant/message', 1, { message: { content: [{ type: 'text', text: long }] } }),
+      event('user/message', 2, { content: [{ type: 'text', text: long }], source: { kind: 'user' } }),
+    ])
+    expect(rows).toHaveLength(2)
+    const [assistant, user] = rows
+    expect(assistant?.kind === 'assistant' ? assistant.text : undefined).toBe(long)
+    expect(user?.kind === 'user' ? user.text : undefined).toBe(long)
+    expect(
+      rows.some((entry) => (entry.kind === 'user' || entry.kind === 'assistant') && entry.text.includes('…')),
+    ).toBe(false)
+  })
+
+  it('keeps a streamed answer whole past any text budget', () => {
+    const live = (seq: number, text: string): EventEntryLike => ({
+      type: 'transient',
+      event: {
+        type: 'assistant/live-chunk',
+        seq,
+        time: seq,
+        data: { attemptId: 'a1', turn: 1, step: 1, chunk: { type: 'text-delta', index: 0, text } },
+      },
+    })
+    const deltas = Array.from({ length: 5 }, (_, index) => `chunk${index}-${'x'.repeat(1_000)} `)
+    const rows = deriveTranscript(deltas.map((text, index) => live(index + 1, text)))
+    const [only] = rows
+    if (only?.kind !== 'assistant') throw new Error('unreachable')
+    expect(only.text).toBe(deltas.join(''))
+    expect(only.text.endsWith('…')).toBe(false)
+  })
+
+  it('renders approvals and retries as localized notice codes', () => {
+    const rows = deriveTranscript([
+      event('approval/asked', 1, { toolName: 'bash' }),
+      event('approval/decided', 2, { outcome: 'rejected' }),
+      event('llm/retry', 3, { reason: 'rate limited' }),
+    ])
+    expect(rows.map((entry) => (entry.kind === 'notice' ? entry.code : ''))).toEqual([
+      'approval-asked',
+      'approval-decided',
+      'retry',
+    ])
+    expect(rows[1]?.kind === 'notice' && rows[1].tone).toBe('error')
+  })
+
+  it('ignores assistant messages with no text and unknown event types', () => {
+    const rows = deriveTranscript([
+      event('assistant/message', 1, { message: { content: [{ type: 'reasoning', text: 'thinking' }] } }),
+      event('todo/write', 2, { todos: [] }),
+    ])
+    expect(rows).toEqual([])
+  })
+
+  it('keeps only the recent window', () => {
+    const entries: EventEntryLike[] = Array.from({ length: 90 }, (_, index) =>
+      event('user/message', index, {
+        content: [{ type: 'text', text: `m${index}` }],
+        source: { kind: 'user' },
+      }),
+    )
+    const rows = deriveTranscript(entries)
+    expect(rows).toHaveLength(60)
+    const first = rows[0]
+    const last = rows.at(-1)
+    expect(first?.kind === 'user' ? first.text : undefined).toBe('m30')
+    expect(last?.kind === 'user' ? last.text : undefined).toBe('m89')
+    expect(kinds(rows).every((kind) => kind === 'user')).toBe(true)
+  })
+
+  it('tolerates malformed entries', () => {
+    expect(deriveTranscript([{}, { type: 'event' }, { event: {} }])).toEqual([])
+    expect(deriveTranscript(undefined)).toEqual([])
+  })
+})
+
+describe('summarizeArguments', () => {
+  it('shows the first two keys of parsed arguments', () => {
+    expect(summarizeArguments('{"command":"ls -la","description":"list","other":1}')).toBe(
+      'command=ls -la · description=list',
+    )
+  })
+
+  it('describes non-string values compactly', () => {
+    expect(summarizeArguments('{"limit":20,"deep":true,"items":[1,2,3],"nested":{"a":1}}')).toBe(
+      'limit=20 · deep=true',
+    )
+  })
+
+  it('falls back to the raw prefix when the JSON is broken', () => {
+    const raw = `{broken ${'x'.repeat(200)}`
+    expect(summarizeArguments(raw)).toBe(`${raw.replace(/\s+/g, ' ').slice(0, 80)}…`)
+    expect(summarizeArguments('')).toBe('')
+    expect(summarizeArguments(undefined)).toBe('')
+  })
+})
+
+describe('relativeLabel', () => {
+  it('classifies timestamps against the current clock', () => {
+    const now = Date.parse('2026-11-01T12:00:00Z')
+    expect(relativeLabel(now, now - 1_000)).toEqual({ unit: 'now' })
+    expect(relativeLabel(now, now - 5 * 60_000)).toEqual({ unit: 'minute', count: 5 })
+    expect(relativeLabel(now, now - 3 * 3_600_000)).toEqual({ unit: 'hour', count: 3 })
+    expect(relativeLabel(now, now - 2 * 86_400_000)).toEqual({ unit: 'day', count: 2 })
+    expect(relativeLabel(now, 0)).toBeUndefined()
+    expect(relativeLabel(now, Number.NaN)).toBeUndefined()
+  })
+
+  it('formats an older timestamp as a date', () => {
+    const label = relativeLabel(Date.parse('2026-11-01T00:00:00Z'), Date.parse('2026-09-01T00:00:00Z'))
+    expect(label?.unit).toBe('date')
+  })
+})
+describe('permission presets', () => {
+  it('maps the built-in preset values to this plugin\'s own labels', () => {
+    expect(permissionLabelKey('read-only')).toBe('permReadOnly')
+    expect(permissionLabelKey('workspace-write')).toBe('permWorkspaceWrite')
+    expect(permissionLabelKey('danger-full-access')).toBe('permFullAccess')
+    expect(permissionLabelKey('auto')).toBe('permAuto')
+    expect(permissionLabelKey('custom')).toBe('permCustom')
+    expect(permissionLabelKey('team-policy')).toBeUndefined()
+    expect(permissionLabelKey(undefined)).toBeUndefined()
+  })
+
+  it('title-cases a conventional kebab-case name and leaves a product label alone', () => {
+    expect(displayPresetName('team-policy')).toBe('Team Policy')
+    expect(displayPresetName('Full access')).toBe('Full access')
+  })
+
+  it('asks for confirmation only on Auto review — Full access is an explicit pick', () => {
+    expect(needsPermissionConfirmation('auto')).toBe(true)
+    expect(needsPermissionConfirmation('danger-full-access')).toBe(false)
+    expect(needsPermissionConfirmation('workspace-write')).toBe(false)
+    expect(needsPermissionConfirmation('read-only')).toBe(false)
+  })
+})
+
+/** One displayed-card shape, reduced to the fields the order reconcile reads. */
+function card(id: string, updatedAt: number, state: 'idle' | 'running' | 'waiting' = 'idle') {
+  return {
+    id,
+    title: id,
+    cwd: undefined,
+    workspace: undefined,
+    running: state === 'running',
+    pending: state === 'waiting' ? { key: `p-${id}` } : undefined,
+    updatedAt,
+    state,
+    completionUnread: false,
+  }
+}
+
+describe('frozen grid order', () => {
+  it('keeps the displayed order when activity changes', () => {
+    // A new prompt would order c, b, a by recency; the displayed order must win.
+    const candidates = [card('a', 10), card('b', 20), card('c', 30)]
+    expect(reconcileOrder(['a', 'b', 'c'], candidates, 3)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('appends a session that appears while there is room', () => {
+    const candidates = [card('a', 10), card('b', 20), card('d', 5)]
+    expect(reconcileOrder(['a', 'b'], candidates, 3)).toEqual(['a', 'b', 'd'])
+  })
+
+  it('gives a new session the slot of the least recently used card on a full grid', () => {
+    const candidates = [card('a', 10), card('b', 30), card('c', 20), card('d', 40)]
+    // `a` is the oldest at index 0; the new card takes that slot in place.
+    expect(reconcileOrder(['a', 'b', 'c'], candidates, 3)).toEqual(['d', 'b', 'c'])
+  })
+
+  it('never displaces a waiting card, replacing the oldest ordinary one instead', () => {
+    const candidates = [card('a', 5, 'waiting'), card('b', 30), card('c', 40)]
+    // Measured by index: `a` stays at 0 while `b` (ordinary, index 1) yields.
+    expect(reconcileOrder(['a', 'b'], candidates, 1)).toEqual(['a', 'c'])
+  })
+
+  it('keeps the frozen order when the budget shrinks, and reveals it again when it grows', () => {
+    const candidates = [card('a', 10), card('b', 20), card('c', 30)]
+    const order = reconcileOrder(['a', 'b', 'c'], candidates, 2)
+    expect(order).toEqual(['a', 'b', 'c'])
+    expect(displayOrder(order, candidates, 2)).toEqual(['a', 'b'])
+    expect(displayOrder(order, candidates, 9)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('always shows a waiting card, even past the ordinary budget', () => {
+    const candidates = [card('a', 10), card('b', 20, 'waiting'), card('c', 30)]
+    expect(displayOrder(['a', 'b', 'c'], candidates, 1)).toEqual(['a', 'b'])
+  })
+
+  it('re-ranks when the budget shrinks, so the newest sessions stay', () => {
+    const candidates = [card('a', 10), card('b', 20), card('c', 30)]
+    expect(reconcileBudget(['a', 'b', 'c'], candidates, 3, 2)).toEqual(['c', 'b', 'a'])
+  })
+
+  it('keeps the order when the budget grows and appends what is not shown yet', () => {
+    const candidates = [card('a', 10), card('b', 20), card('c', 30)]
+    expect(reconcileBudget(['b', 'a'], candidates, 2, 3)).toEqual(['b', 'a', 'c'])
+  })
+
+  it('drops a displayed session that disappeared and leaves the rest in place', () => {
+    const candidates = [card('a', 10), card('c', 30)]
+    expect(reconcileOrder(['a', 'b', 'c'], candidates, 3)).toEqual(['a', 'c'])
+  })
+})
