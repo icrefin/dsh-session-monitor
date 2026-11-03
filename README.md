@@ -41,12 +41,18 @@ Each card carries, for a session you are **not** viewing:
 - **a clickable title**: clicking a card's title opens that session in the
   conversation view (`ctx.uiWorkspace.openSession(id)`); a composition without
   the navigation service keeps the title as a plain heading;
+- **a completion reminder**: a session whose run ended unread draws a green dot
+  and a `done` label; clicking anywhere on the card clears it back to the grey
+  idle dot, and the next run lights it again;
 - **its permission preset**, switchable from the card (Read Only, Workspace Write,
   Full access, and any other preset the Host offers) without opening the session;
 - **the messages queued for its next turn**, each with the dock's own **Steer**
   (while the session runs), **Edit** and **Discard** actions;
 - **its model**, switchable from the same row as the permission preset, using the
   session's shared model directory (the one the composer picker and `/model` use);
+- **its usage readout** on that same row: tokens consumed, prompt-cache hit share
+  and context-window occupancy, read from the same `tokenUsage` and
+  `contextPressure` projections the native composer footer uses;
 - a **remove** button that takes the session off this grid only.
 
 ## Picking this up elsewhere
@@ -221,7 +227,7 @@ answer was accepted.
 cd dsh-session-monitor
 pnpm install
 pnpm check
-scripts/install.sh            # packs dist/dsh-session-monitor-0.1.2.tgz
+scripts/install.sh            # builds, packs and prints the tarball path
 ```
 
 Install that tarball through **Settings → Plugins** (or

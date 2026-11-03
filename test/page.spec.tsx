@@ -286,6 +286,138 @@ describe('MonitorPage', () => {
     expect(openSession).toHaveBeenCalledWith('session-1')
   })
 
+  it('marks a finished session green until its card is clicked, then grey', async () => {
+    const list = new Source<SessionListSnapshotLike>({
+      ids: ['session-1'],
+      byId: {
+        'session-1': { id: 'session-1', title: 'Finished', running: false, blank: false, updatedAt: 2_000 },
+      },
+      phase: 'ready',
+    })
+    const statuses = new Source<ReadonlyMap<string, SessionStatusLike>>(
+      new Map([['session-1', { running: false, completionUnread: true }]]),
+    )
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage t={t} store={store} sessions={sessions} uiSession={{ sessionStatus: statuses }} />,
+    )
+
+    const dotState = (): string | null => host.querySelector('.dsm-dot')?.getAttribute('data-state') ?? null
+    expect(dotState()).toBe('completed')
+    expect(host.textContent).toContain(en.completed)
+
+    const card = host.querySelector('.dsm-card')
+    expect(card, 'the card should exist').not.toBeNull()
+    await act(async () => {
+      card?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await flush()
+    // The click is the acknowledgement: grey at once, and remembered.
+    expect(dotState()).toBe('idle')
+    expect(store.getSnapshot().acknowledged.has('session-1')).toBe(true)
+
+    // The next snapshot without the unread flag ends the reminder, so a later
+    // completion can light the green dot again.
+    await act(async () => {
+      statuses.set(new Map([['session-1', { running: false }]]))
+    })
+    await flush()
+    expect(store.getSnapshot().acknowledged.size).toBe(0)
+
+    // An idle card with no finished run must not start a reminder either.
+    await act(async () => {
+      card?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    })
+    await flush()
+    expect(store.getSnapshot().acknowledged.size).toBe(0)
+  })
+
+  it('shows the token, cache-hit and context readout from the session projections', async () => {
+    const list = new Source<SessionListSnapshotLike>({
+      ids: ['session-1'],
+      byId: {
+        'session-1': { id: 'session-1', title: 'Measured', running: false, blank: false, updatedAt: 1_000 },
+      },
+      phase: 'ready',
+    })
+    const usage = new Source({
+      uncachedInputTokens: 1_000,
+      cacheReadTokens: 9_000,
+      cacheWriteTokens: 0,
+      outputTokens: 500,
+    })
+    const pressure = new Source({ projectedTokens: 40_000, contextWindow: 128_000 })
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: {
+            sessionId: id,
+            prompt: vi.fn(async () => ({ ok: true })),
+            projections: {
+              faceOf: (key: string) =>
+                key === 'tokenUsage' ? usage : key === 'contextPressure' ? pressure : undefined,
+            },
+          },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage t={t} store={store} sessions={sessions} uiSession={{ sessionStatus: new Source(new Map()) }} />,
+    )
+
+    const stats = [...host.querySelectorAll('.dsm-usageStat')].map((node) => node.textContent)
+    expect(stats).toEqual(['10.5k tok', '90% cache', '31% ctx'])
+    // The tooltip carries the exact figure, not the compact one.
+    expect(host.querySelector('.dsm-usageStat[data-stat=tokens]')?.getAttribute('title')).toContain('10,500')
+    expect(host.querySelector('.dsm-usageStat[data-stat=context]')?.getAttribute('title')).toContain('128k')
+  })
+
+  it('hides the readout until a projection reports usage', async () => {
+    const list = new Source<SessionListSnapshotLike>({
+      ids: ['session-1'],
+      byId: {
+        'session-1': { id: 'session-1', title: 'Quiet', running: false, blank: false, updatedAt: 1_000 },
+      },
+      phase: 'ready',
+    })
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage t={t} store={store} sessions={sessions} uiSession={{ sessionStatus: new Source(new Map()) }} />,
+    )
+
+    expect(host.querySelector('.dsm-usage')).toBeNull()
+  })
+
   it('keeps card positions when a card becomes the most recently active', async () => {
     const list = new Source<SessionListSnapshotLike>({
       ids: ['session-1', 'session-2', 'session-3'],

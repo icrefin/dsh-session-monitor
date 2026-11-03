@@ -40,8 +40,24 @@ export const en = {
   waiting: 'waiting for you',
   /** Card state: a turn is running. */
   working: 'working',
+  /** Card state: a finished run the user has not looked at yet. */
+  completed: 'done',
   /** Card state: idle. */
   idle: 'idle',
+  /** Card footer: tokens the session consumed. */
+  usageTokens: '{tokens} tok',
+  /** Card footer: prompt-cache hit share. */
+  usageCacheHit: '{percent}% cache',
+  /** Card footer: context-window occupancy. */
+  usageContext: '{percent}% ctx',
+  /** Card footer: accessible name of the usage readout. */
+  usageLabel: 'Session usage',
+  /** Tooltip: exact tokens consumed. */
+  usageTokensTitle: 'Tokens used in this session: {tokens}',
+  /** Tooltip: prompt-cache hit share. */
+  usageCacheHitTitle: 'Prompt cache hit: {percent}%',
+  /** Tooltip: context-window occupancy. */
+  usageContextTitle: 'Context window: {percent}% used ({used} of {window})',
   /** Card action: remove this card. */
   remove: 'Remove from monitor',
   /** Card: open this session in the conversation view. */
@@ -181,7 +197,15 @@ export const zh: typeof en = {
   emptyBody: '开始一个新会话，或恢复从这个网格中移除的会话。',
   waiting: '等待你回答',
   working: '运行中',
+  completed: '已完成',
   idle: '空闲',
+  usageTokens: '{tokens} tok',
+  usageCacheHit: '缓存 {percent}%',
+  usageContext: '上下文 {percent}%',
+  usageLabel: '会话用量',
+  usageTokensTitle: '本会话已用 token：{tokens}',
+  usageCacheHitTitle: '提示缓存命中：{percent}%',
+  usageContextTitle: '上下文窗口：已用 {percent}%（{used} / {window}）',
   remove: '从监视器中移除',
   openSession: '打开会话',
   permission: '权限',

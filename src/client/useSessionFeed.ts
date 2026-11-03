@@ -29,6 +29,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { REFERENCE_SOURCE } from './plugin.ts'
 import type {
+  ContextPressureLike,
   EventEntryLike,
   InboxSnapshotLike,
   ObservableSnapshotLike,
@@ -36,6 +37,7 @@ import type {
   QueueRowLike,
   SessionFaceLike,
   SessionsServiceLike,
+  TokenUsageLike,
 } from './types.ts'
 
 /** What one card knows about its session right now. */
@@ -50,6 +52,10 @@ export interface SessionFeed {
   readonly permission: string | undefined
   /** Messages queued for this session's next turn, in FIFO order. */
   readonly queue: readonly QueueRowLike[] | undefined
+  /** Provider-reported token usage over the whole durable log. */
+  readonly usage: TokenUsageLike | undefined
+  /** Newest request pressure and the route's context capacity. */
+  readonly pressure: ContextPressureLike | undefined
   /** History could not be opened (or retention was refused). */
   readonly error: boolean
   /** History is still opening. */
@@ -63,6 +69,8 @@ interface FeedState {
   running: boolean | undefined
   permission: string | undefined
   queue: readonly QueueRowLike[] | undefined
+  usage: TokenUsageLike | undefined
+  pressure: ContextPressureLike | undefined
   error: boolean
   opening: boolean
 }
@@ -74,6 +82,8 @@ const INITIAL: FeedState = {
   running: undefined,
   permission: undefined,
   queue: undefined,
+  usage: undefined,
+  pressure: undefined,
   error: false,
   opening: true,
 }
@@ -111,6 +121,8 @@ export function useSessionFeed(
     let stopSession: () => void = () => {}
     let stopPermission: () => void = () => {}
     let stopInbox: () => void = () => {}
+    let stopUsage: () => void = () => {}
+    let stopPressure: () => void = () => {}
     let timer: ReturnType<typeof setInterval> | undefined
     let reference: ReturnType<NonNullable<SessionsServiceLike['retain']>> | undefined
 
@@ -124,6 +136,8 @@ export function useSessionFeed(
           running: undefined,
           permission: undefined,
           queue: undefined,
+          usage: undefined,
+          pressure: undefined,
           error: true,
           opening: false,
         })
@@ -206,6 +220,44 @@ export function useSessionFeed(
             }
           }
           /**
+           * The token and context projections are the ones the native composer
+           * footer reads (`UsagePill`, `ContextMeter`). A card shows the same
+           * numbers the open conversation would, without opening it.
+           */
+          let usageFace: ObservableSnapshotLike<unknown> | undefined
+          let pressureFace: ObservableSnapshotLike<unknown> | undefined
+          try {
+            usageFace = face?.projections?.faceOf?.('tokenUsage')
+          } catch (error) {
+            console.warn(`[dsh-session-monitor] session ${sessionId} exposes no token usage projection`, error)
+          }
+          try {
+            pressureFace = face?.projections?.faceOf?.('contextPressure')
+          } catch (error) {
+            console.warn(`[dsh-session-monitor] session ${sessionId} exposes no context pressure projection`, error)
+          }
+
+          const readUsage = (): TokenUsageLike | undefined => {
+            try {
+              const snapshot = usageFace?.getSnapshot?.() as TokenUsageLike | undefined
+              return snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot
+            } catch (error) {
+              console.warn(`[dsh-session-monitor] session ${sessionId} published unreadable token usage`, error)
+              return undefined
+            }
+          }
+
+          const readPressure = (): ContextPressureLike | undefined => {
+            try {
+              const snapshot = pressureFace?.getSnapshot?.() as ContextPressureLike | undefined
+              return snapshot === null || typeof snapshot !== 'object' ? undefined : snapshot
+            } catch (error) {
+              console.warn(`[dsh-session-monitor] session ${sessionId} published unreadable context pressure`, error)
+              return undefined
+            }
+          }
+
+          /**
            * A terminated tail stream is permanent: the controller marks the
            * session `openState: 'error'` and never retries by itself, so the card
            * would keep showing the window it opened with. Reopening the binding is
@@ -280,6 +332,8 @@ export function useSessionFeed(
               const running = typeof snapshot?.running === 'boolean' ? snapshot.running : undefined
               const permission = readPermission()
               const queue = readQueue()
+              const usage = readUsage()
+              const pressure = readPressure()
               checkLiveness(window?.entries, running, snapshot?.openState)
               setFeed((previous) => {
                 if (
@@ -288,6 +342,8 @@ export function useSessionFeed(
                   previous.running === running &&
                   previous.permission === permission &&
                   previous.queue === queue &&
+                  previous.usage === usage &&
+                  previous.pressure === pressure &&
                   !previous.error &&
                   !previous.opening
                 ) {
@@ -299,6 +355,8 @@ export function useSessionFeed(
                   running,
                   permission,
                   queue,
+                  usage,
+                  pressure,
                   error: false,
                   opening: false,
                 }
@@ -331,6 +389,16 @@ export function useSessionFeed(
             if (typeof inboxFace?.subscribe === 'function') stopInbox = inboxFace.subscribe(publish) ?? (() => {})
           } catch (error) {
             console.warn(`[dsh-session-monitor] session ${sessionId} queue could not be followed`, error)
+          }
+          try {
+            if (typeof usageFace?.subscribe === 'function') stopUsage = usageFace.subscribe(publish) ?? (() => {})
+          } catch (error) {
+            console.warn(`[dsh-session-monitor] session ${sessionId} token usage could not be followed`, error)
+          }
+          try {
+            if (typeof pressureFace?.subscribe === 'function') stopPressure = pressureFace.subscribe(publish) ?? (() => {})
+          } catch (error) {
+            console.warn(`[dsh-session-monitor] session ${sessionId} context pressure could not be followed`, error)
           }
 
           // Reconciliation: local snapshot reads, so a missed notification only
@@ -366,6 +434,16 @@ export function useSessionFeed(
         stopInbox()
       } catch {
         // The queue notifier is already gone.
+      }
+      try {
+        stopUsage()
+      } catch {
+        // The usage notifier is already gone.
+      }
+      try {
+        stopPressure()
+      } catch {
+        // The context notifier is already gone.
       }
       try {
         reference?.release?.()

@@ -24,8 +24,13 @@ import { InteractionCard } from './InteractionCard.tsx'
 import { useModelDirectory } from './useModelDirectory.ts'
 import type { MonitorTranslate } from './locales.ts'
 import {
+  cacheHitPercent,
+  consumedTokens,
+  contextOccupancy,
   deriveTranscript,
   displayPresetName,
+  formatCompactTokens,
+  formatExactTokens,
   monitorState,
   needsPermissionConfirmation,
   newestEventTime,
@@ -63,6 +68,8 @@ export interface SessionCardProps {
   readonly modelDirectoryFor?: ((sessionId: string) => ModelDirectoryLike | undefined) | undefined
   /** Open this session in the conversation view, when the navigation service exists. */
   readonly openSession?: ((sessionId: string) => void) | undefined
+  /** Whether the user already looked at this Session's finished run. */
+  readonly acknowledged?: boolean | undefined
 }
 
 /** Longest draft kept in a card composer. */
@@ -220,6 +227,7 @@ export function SessionCard({
   permissionCatalog,
   modelDirectoryFor,
   openSession,
+  acknowledged,
 }: SessionCardProps): ReactElement {
   const feed = useSessionFeed(sessions, session.id, session.updatedAt)
   const [draft, setDraft] = useState('')
@@ -276,7 +284,15 @@ export function SessionCard({
   // is the fallback before the binding reports and after it goes away. Either
   // source saying "running" wins, so a lagging snapshot never hides live work.
   const running = session.running || feed.running === true
-  const state = monitorState(running, pending)
+  // The green completion mark exists to be noticed: it stays until the user
+  // clicks this card, which records the acknowledgement in the local store.
+  const completed = session.completionUnread && acknowledged !== true
+  const state = monitorState(running, pending, completed)
+  // The same three figures the native composer footer shows: whole-log tokens,
+  // prompt-cache hit share, and how full the context window is.
+  const usedTokens = consumedTokens(feed.usage)
+  const cacheHit = cacheHitPercent(feed.usage)
+  const context = contextOccupancy(feed.pressure)
 
   const pendingKey = pending?.key ?? ''
   useEffect(() => {
@@ -596,15 +612,27 @@ export function SessionCard({
       })
   }
 
-  const stateLabel = state === 'waiting' ? t('waiting') : running ? t('working') : t('idle')
+  const stateLabel =
+    state === 'waiting'
+      ? t('waiting')
+      : state === 'completed'
+        ? t('completed')
+        : running
+          ? t('working')
+          : t('idle')
   // Activity, not just the last prompt: the newest visible event keeps the label
   // moving while the session writes, and freezes only when the card is behind.
   const activityAt = Math.max(session.updatedAt, newestEventTime(feed.entries))
   const timeLabel = when(t, now, activityAt)
   const workspace = session.workspace
 
+  const acknowledge = (): void => {
+    if (!completed) return
+    store.acknowledge(session.id)
+  }
+
   return (
-    <article className="dsm-card" data-state={state} aria-label={session.title}>
+    <article className="dsm-card" data-state={state} aria-label={session.title} onClick={acknowledge}>
       <header className="dsm-cardHead">
         <span className="dsm-dot" data-state={state} aria-hidden="true" />
         <div className="dsm-cardHeadText">
@@ -834,30 +862,66 @@ export function SessionCard({
               </select>
             </label>
           ) : null}
-          <span className="dsm-spacer" />
-          {running ? (
+          {usedTokens === 0 && cacheHit === null && context === null ? null : (
+            <div className="dsm-usage" role="group" aria-label={t('usageLabel')}>
+              {usedTokens === 0 ? null : (
+                <span
+                  className="dsm-usageStat"
+                  data-stat="tokens"
+                  title={t('usageTokensTitle', { tokens: formatExactTokens(usedTokens) })}
+                >
+                  {t('usageTokens', { tokens: formatCompactTokens(usedTokens) })}
+                </span>
+              )}
+              {cacheHit === null ? null : (
+                <span
+                  className="dsm-usageStat"
+                  data-stat="cache"
+                  title={t('usageCacheHitTitle', { percent: cacheHit })}
+                >
+                  {t('usageCacheHit', { percent: cacheHit })}
+                </span>
+              )}
+              {context === null ? null : (
+                <span
+                  className="dsm-usageStat"
+                  data-stat="context"
+                  title={t('usageContextTitle', {
+                    percent: context.percent,
+                    used: formatCompactTokens(context.used),
+                    window: formatCompactTokens(context.contextWindow),
+                  })}
+                >
+                  {t('usageContext', { percent: context.percent })}
+                </span>
+              )}
+            </div>
+          )}
+          <span className="dsm-footerActions">
+            {running ? (
+              <button
+                type="button"
+                className="dsm-btn"
+                data-danger="true"
+                disabled={stopping}
+                onClick={stopSession}
+                aria-label={t('stop')}
+                title={stopFailed ? t('stopFailed') : t('stopHint')}
+              >
+                {stopping ? t('stopping') : t('stop')}
+              </button>
+            ) : null}
             <button
               type="button"
               className="dsm-btn"
-              data-danger="true"
-              disabled={stopping}
-              onClick={stopSession}
-              aria-label={t('stop')}
-              title={stopFailed ? t('stopFailed') : t('stopHint')}
+              data-primary="true"
+              disabled={busy || draft.trim() === ''}
+              onClick={send}
+              title={promptFailed ? t('promptFailed') : t('send')}
             >
-              {stopping ? t('stopping') : t('stop')}
+              {busy ? t('sending') : t('send')}
             </button>
-          ) : null}
-          <button
-            type="button"
-            className="dsm-btn"
-            data-primary="true"
-            disabled={busy || draft.trim() === ''}
-            onClick={send}
-            title={promptFailed ? t('promptFailed') : t('send')}
-          >
-            {busy ? t('sending') : t('send')}
-          </button>
+          </span>
         </div>
         {permissionConfirm === null ? null : (
           <div className="dsm-permConfirm" role="group" aria-label={t('permission')}>

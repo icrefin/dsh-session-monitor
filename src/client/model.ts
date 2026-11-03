@@ -12,16 +12,18 @@
 
 import type { MonitorKey } from './locales.ts'
 import type {
+  ContextPressureLike,
   EventEntryLike,
   PendingInteractionLike,
   SessionListSnapshotLike,
   SessionRowLike,
   SessionStatusLike,
+  TokenUsageLike,
   WorkspaceViewLike,
 } from './types.ts'
 
 /** How a monitored session is doing right now. */
-export type MonitorState = 'waiting' | 'running' | 'idle'
+export type MonitorState = 'waiting' | 'running' | 'completed' | 'idle'
 
 /** One session the grid shows, after ordering and removal. */
 export interface MonitoredSession {
@@ -250,13 +252,127 @@ export function sessionTitle(row: SessionRowLike): string {
 
 /**
  * Derive the state mark of one session.
+ *
+ * A run that ended and was never opened outranks plain idleness: its green mark
+ * is the reminder that the result still needs a look. A fresh run supersedes it
+ * (`completionUnread` is already false while running), and a pending question
+ * outranks everything, because it is the one state that blocks the session.
+ *
  * @param running - host run state.
  * @param pending - pending interaction, when any.
+ * @param completionUnread - a finished run this browser has not opened since.
  * @returns the state mark.
  */
-export function monitorState(running: boolean, pending: PendingInteractionLike | undefined): MonitorState {
+export function monitorState(
+  running: boolean,
+  pending: PendingInteractionLike | undefined,
+  completionUnread = false,
+): MonitorState {
   if (pending !== undefined) return 'waiting'
-  return running ? 'running' : 'idle'
+  if (running) return 'running'
+  return completionUnread ? 'completed' : 'idle'
+}
+
+/**
+ * Count one optional token bucket, ignoring anything that is not a number.
+ * @param value - a provider-reported bucket.
+ * @returns the bucket, or 0.
+ */
+function tokens(value: number | undefined): number {
+  return typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0
+}
+
+/**
+ * Sum the three disjoint prompt-side buckets, exactly as the native footer does.
+ * @param usage - the session's token-usage projection.
+ * @returns billed input tokens (0 when nothing was billed).
+ */
+export function billedInputTokens(usage: TokenUsageLike | undefined): number {
+  if (usage === undefined) return 0
+  return tokens(usage.uncachedInputTokens) + tokens(usage.cacheReadTokens) + tokens(usage.cacheWriteTokens)
+}
+
+/**
+ * Total tokens the session consumed: billed input plus completion output.
+ * @param usage - the session's token-usage projection.
+ * @returns the total, 0 when no usage is known.
+ */
+export function consumedTokens(usage: TokenUsageLike | undefined): number {
+  if (usage === undefined) return 0
+  return billedInputTokens(usage) + tokens(usage.outputTokens)
+}
+
+/**
+ * Prompt-cache hit share of the billed input.
+ *
+ * Rounding stays below 100 unless every billed prompt token was a cache read, so
+ * a near-miss never reads as a perfect hit — the same rule the native usage pill
+ * applies.
+ *
+ * @param usage - the session's token-usage projection.
+ * @returns integer percent, or null when no prompt tokens were billed.
+ */
+export function cacheHitPercent(usage: TokenUsageLike | undefined): number | null {
+  const billed = billedInputTokens(usage)
+  const read = tokens(usage?.cacheReadTokens)
+  if (billed === 0) return null
+  if (read >= billed) return 100
+  return Math.min(99, Math.max(0, Math.round((read / billed) * 100)))
+}
+
+/** Bounded context occupancy, as the native context meter shows it. */
+export interface ContextOccupancy {
+  /** Whole percent of the window in use, capped at 100. */
+  readonly percent: number
+  /** Prompt tokens the next request would carry. */
+  readonly used: number
+  /** The newest recorded route capacity. */
+  readonly contextWindow: number
+}
+
+/**
+ * Resolve context-window occupancy from the pressure projection.
+ *
+ * The numerator is the next request's projection when it exists, so the card
+ * reacts the moment a compaction changes the surface — the same choice the
+ * native meter makes.
+ *
+ * @param pressure - the session's context-pressure projection.
+ * @returns occupancy, or null until both a size and a capacity are known.
+ */
+export function contextOccupancy(pressure: ContextPressureLike | undefined): ContextOccupancy | null {
+  const used = pressure?.projectedTokens ?? pressure?.pressureTokens
+  const contextWindow = pressure?.contextWindow
+  if (typeof used !== 'number' || !Number.isFinite(used) || used < 0) return null
+  if (typeof contextWindow !== 'number' || !Number.isFinite(contextWindow) || contextWindow <= 0) return null
+  return { percent: Math.min(100, Math.round((used / contextWindow) * 100)), used, contextWindow }
+}
+
+/**
+ * Compact a token count for a pill: `999`, `1.2k`, `12k`, `1.3M`.
+ * @param value - token count.
+ * @returns the short form.
+ */
+export function formatCompactTokens(value: number): string {
+  const whole = Math.max(0, Math.round(value))
+  /**
+   * One decimal below 100, whole numbers above it — the native token pill's own
+   * rule, so `10.5k` does not become `11k`.
+   */
+  const scaled = (candidate: number): string =>
+    candidate >= 100 ? String(Math.round(candidate)) : String(Math.round(candidate * 10) / 10)
+  if (whole < 1_000) return String(whole)
+  if (whole < 1_000_000) return `${scaled(whole / 1_000)}k`
+  return `${scaled(whole / 1_000_000)}M`
+}
+
+/**
+ * Group a token count for a tooltip: `12345` → `12,345`.
+ * @param value - token count.
+ * @returns the exact form.
+ */
+export function formatExactTokens(value: number): string {
+  return String(Math.max(0, Math.round(value))).replace(/\B(?=(\d{3})+(?!\d))/g, ',')
 }
 
 /**

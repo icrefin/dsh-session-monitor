@@ -1,6 +1,6 @@
 # Handoff — dsh-session-monitor
 
-**Version:** 0.7.1 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
+**Version:** 0.7.6 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
 **Written:** 2026-11-02 · **Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
 
 This document is for the next person (or agent) picking this work up on **another machine**.
@@ -12,7 +12,7 @@ It records what exists, what was verified, what was not, and what to do next.
 
 The plugin is feature-complete for its stated purpose and passes `pnpm check` (97 tests, both
 halves typechecked, loader bundle built). It is installed into the **desktop profile** on the
-machine where it was written, currently **0.7.1**; a bundle added to a running profile is inert
+machine where it was written, currently **0.7.6**; a bundle added to a running profile is inert
 until the app restarts, so the panel shows the new build only after a relaunch. The panel has **never been seen in the running GUI**: browser control was unavailable to
 the agent that built it. Layout was checked in a local Vite **component fixture** only. Treat
 in-app visual verification as the first open task.
@@ -310,3 +310,8 @@ Remember: a fixture screenshot proves layout, **not** app behaviour.
 | 0.6.2 | Shrinking the card budget re-ranks to the newest sessions; growing it keeps the order |
 | 0.7.0 | Card titles open their session in the conversation view (`ctx.uiWorkspace.openSession`) |
 | 0.7.1 | Message text is never clipped: the per-row 2,000-character budget is gone, so a long answer reads to its last word |
+| 0.7.2 | Session card titles are larger (14px, 19px line height), for readability in a dense grid |
+| 0.7.3 | Card titles read the global content font size (`--dsh-content-font-size`), so they follow the DSH font-size setting |
+| 0.7.4 | A finished unread run draws a green completion dot; clicking the card acknowledges it and returns the dot to grey idle |
+| 0.7.5 | Card footer reads tokens consumed, cache-hit share and context occupancy from the native `tokenUsage` and `contextPressure` projections |
+| 0.7.6 | Usage readout uses the permission/model select text colour (`--dsw-alias-label-secondary`) |

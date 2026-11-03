@@ -15,10 +15,22 @@ import { DEFAULT_MAX_CARDS, MAX_CARDS_LIMIT, MAX_COLUMNS } from './model.ts'
 /** Storage key of the monitor's preferences. */
 export const STORAGE_KEY = 'dsh-session-monitor:prefs'
 
+/** Most acknowledgements kept, oldest dropped: a reminder log, not a history. */
+const ACKNOWLEDGED_LIMIT = 200
+
 /** One immutable view of the preferences. */
 export interface MonitorPrefs {
   /** Session ids removed from the grid. */
   readonly hidden: ReadonlySet<string>
+  /**
+   * Session ids whose finished run this browser has already looked at.
+   *
+   * The green completion mark stays until the user clicks the card; this set is
+   * what records that click across remounts. It is forgotten as soon as the
+   * Session reports no unread completion (a new run started, or the Session was
+   * opened elsewhere), so the mark returns for the next run.
+   */
+  readonly acknowledged: ReadonlySet<string>
   /** Card budget for idle and running sessions. */
   readonly maxCards: number
   /** Cards per row; `0` lets the grid fill the column automatically. */
@@ -43,7 +55,7 @@ export interface MonitorPrefsSource {
  * @returns the parsed preferences, or the defaults.
  */
 export function parsePrefs(raw: string | null): MonitorPrefs {
-  const defaults: MonitorPrefs = { hidden: new Set(), maxCards: DEFAULT_MAX_CARDS, columns: 0 }
+  const defaults: MonitorPrefs = { hidden: new Set(), acknowledged: new Set(), maxCards: DEFAULT_MAX_CARDS, columns: 0 }
   if (raw === null || raw.trim() === '') return defaults
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -53,10 +65,15 @@ export function parsePrefs(raw: string | null): MonitorPrefs {
     if (Array.isArray(record.hidden)) {
       for (const id of record.hidden) if (typeof id === 'string' && id !== '') hidden.add(id)
     }
+    const acknowledged = new Set<string>()
+    if (Array.isArray(record.acknowledged)) {
+      for (const id of record.acknowledged) if (typeof id === 'string' && id !== '') acknowledged.add(id)
+    }
     const max = typeof record.maxCards === 'number' && Number.isFinite(record.maxCards) ? Math.trunc(record.maxCards) : DEFAULT_MAX_CARDS
     const columns = typeof record.columns === 'number' && Number.isFinite(record.columns) ? Math.trunc(record.columns) : 0
     return {
       hidden,
+      acknowledged,
       maxCards: Math.max(1, Math.min(MAX_CARDS_LIMIT, max || DEFAULT_MAX_CARDS)),
       columns: Math.max(0, Math.min(MAX_COLUMNS, columns)),
     }
@@ -144,6 +161,39 @@ export class MonitorStore implements MonitorPrefsSource {
     this.#commit({ ...this.#snapshot, hidden })
   }
 
+  /**
+   * Remember that the user looked at one finished session.
+   *
+   * The completion mark is a reminder, not a log: once the card is clicked the
+   * dot goes grey, and the next run clears this record again.
+   *
+   * @param sessionId - session whose completion was seen.
+   */
+  acknowledge(sessionId: string): void {
+    if (sessionId === '' || this.#snapshot.acknowledged.has(sessionId)) return
+    const acknowledged = new Set(this.#snapshot.acknowledged)
+    acknowledged.add(sessionId)
+    // Bounded, oldest-first: this set only exists for reminders that are never
+    // acknowledged, and localStorage must not grow with every session ever run.
+    while (acknowledged.size > ACKNOWLEDGED_LIMIT) {
+      const oldest = acknowledged.values().next().value
+      if (oldest === undefined) break
+      acknowledged.delete(oldest)
+    }
+    this.#commit({ ...this.#snapshot, acknowledged })
+  }
+
+  /**
+   * Forget one acknowledgement, because its completion is no longer unread.
+   * @param sessionId - session whose reminder is over.
+   */
+  clearAcknowledgement(sessionId: string): void {
+    if (!this.#snapshot.acknowledged.has(sessionId)) return
+    const acknowledged = new Set(this.#snapshot.acknowledged)
+    acknowledged.delete(sessionId)
+    this.#commit({ ...this.#snapshot, acknowledged })
+  }
+
   /** Bring every removed session back. */
   restoreAll(): void {
     if (this.#snapshot.hidden.size === 0) return
@@ -179,7 +229,12 @@ export class MonitorStore implements MonitorPrefsSource {
     try {
       this.#storage?.setItem(
         STORAGE_KEY,
-        JSON.stringify({ hidden: [...next.hidden], maxCards: next.maxCards, columns: next.columns }),
+        JSON.stringify({
+          hidden: [...next.hidden],
+          acknowledged: [...next.acknowledged],
+          maxCards: next.maxCards,
+          columns: next.columns,
+        }),
       )
     } catch {
       // A full or blocked storage costs persistence, not the panel.

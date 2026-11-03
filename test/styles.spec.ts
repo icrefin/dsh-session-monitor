@@ -53,6 +53,21 @@ describe('stylesheet', () => {
     expect(PANEL_CSS).toMatch(/\.dsm-tool\{[^}]*var\(--dsh-content-font-size-secondary,/)
   })
 
+  it('sizes the session card titles from the global content font setting', () => {
+    expect(PANEL_CSS).toMatch(/\.dsm-cardTitle\{[^}]*font-size:var\(--dsh-content-font-size,/)
+    expect(PANEL_CSS).toMatch(/\.dsm-cardOpen\{[^}]*font-size:var\(--dsh-content-font-size,/)
+    // No narrow-card override may pin the title back to a literal size.
+    expect(PANEL_CSS).not.toMatch(/\.dsm-cardTitle\{font-size:\d/)
+  })
+
+  it('keeps the usage readout on the same text colour as the selects', () => {
+    expect(PANEL_CSS).toMatch(/\.dsm-usage\{[^}]*color:var\(--dsw-alias-label-secondary\)/)
+  })
+
+  it('paints the finished-run reminder in the success colour', () => {
+    expect(PANEL_CSS).toMatch(/\.dsm-dot\[data-state=completed\]\{[^}]*var\(--dsw-alias-state-success-primary\)/)
+  })
+
   it('injects under one stable, plugin-owned tag id', () => {
     expect(STYLE_ID).toBe('dsh-session-monitor-style')
     expect(PANEL_CSS).toContain('.dsm-page')

@@ -12,13 +12,20 @@
 import { describe, expect, it } from 'vitest'
 import {
   autoColumns,
+  billedInputTokens,
+  cacheHitPercent,
+  consumedTokens,
+  contextOccupancy,
   DEFAULT_MAX_CARDS,
   deriveTranscript,
   displayOrder,
   displayPresetName,
+  formatCompactTokens,
+  formatExactTokens,
   gridRows,
   needsPermissionConfirmation,
   permissionLabelKey,
+  monitorState,
   newestEventTime,
   reconcileBudget,
   reconcileOrder,
@@ -61,6 +68,57 @@ function catalog(rows: readonly Record<string, unknown>[]): SessionListSnapshotL
 function kinds(rows: readonly TranscriptRow[]): string[] {
   return rows.map((entry) => entry.kind)
 }
+
+describe('usage readout', () => {
+  it('sums the prompt buckets and the output', () => {
+    const usage = { uncachedInputTokens: 1_000, cacheReadTokens: 9_000, cacheWriteTokens: 500, outputTokens: 250 }
+    expect(billedInputTokens(usage)).toBe(10_500)
+    expect(consumedTokens(usage)).toBe(10_750)
+    expect(billedInputTokens(undefined)).toBe(0)
+    expect(consumedTokens({})).toBe(0)
+  })
+
+  it('never rounds a near miss up to a perfect cache hit', () => {
+    expect(cacheHitPercent({ uncachedInputTokens: 1, cacheReadTokens: 999 })).toBe(99)
+    expect(cacheHitPercent({ cacheReadTokens: 10 })).toBe(100)
+    expect(cacheHitPercent({ outputTokens: 10 })).toBeNull()
+    expect(cacheHitPercent(undefined)).toBeNull()
+  })
+
+  it('resolves context occupancy from the next-request projection first', () => {
+    expect(contextOccupancy({ projectedTokens: 64_000, pressureTokens: 32_000, contextWindow: 128_000 })).toEqual({
+      percent: 50,
+      used: 64_000,
+      contextWindow: 128_000,
+    })
+    expect(contextOccupancy({ pressureTokens: 32_000, contextWindow: 128_000 })?.percent).toBe(25)
+    expect(contextOccupancy({ projectedTokens: 200_000, contextWindow: 128_000 })?.percent).toBe(100)
+    expect(contextOccupancy({ pressureTokens: 32_000 })).toBeNull()
+    expect(contextOccupancy({ pressureTokens: 32_000, contextWindow: 0 })).toBeNull()
+    expect(contextOccupancy(undefined)).toBeNull()
+  })
+
+  it('formats compact and exact token counts', () => {
+    expect(formatCompactTokens(999)).toBe('999')
+    expect(formatCompactTokens(1_200)).toBe('1.2k')
+    expect(formatCompactTokens(12_500)).toBe('12.5k')
+    expect(formatCompactTokens(125_000)).toBe('125k')
+    expect(formatCompactTokens(1_300_000)).toBe('1.3M')
+    expect(formatExactTokens(12_345)).toBe('12,345')
+    expect(formatExactTokens(999)).toBe('999')
+  })
+})
+
+describe('monitorState', () => {
+  it('draws the reminder for a finished run until something else outranks it', () => {
+    expect(monitorState(false, undefined, true)).toBe('completed')
+    expect(monitorState(false, undefined, false)).toBe('idle')
+    // A fresh run and a pending question both supersede the reminder.
+    expect(monitorState(true, undefined, true)).toBe('running')
+    expect(monitorState(true, { key: 'q' }, true)).toBe('waiting')
+    expect(monitorState(false, { key: 'q' }, true)).toBe('waiting')
+  })
+})
 
 describe('newestEventTime', () => {
   it('returns the newest event time, including transient rows', () => {

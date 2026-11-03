@@ -37,12 +37,17 @@ DeepSeek Harness 一次只显示一个会话。几个会话并行工作时，侧
 - **一个 Stop 按钮**，会话运行期间出现，通过会话自身的 `cancel()` 中止本轮；
 - **可点击的标题**：点击卡片标题会在对话视图中打开该会话
   （`ctx.uiWorkspace.openSession(id)`）；缺少导航服务的组合里，标题就只是一个普通标题；
+- **完成提醒**：运行已经结束、但还没有被看过的会话会画一个绿色圆点和 `done`（已完成）标记；
+  点击卡片任意位置后，它会回到灰色的空闲状态，下一轮运行结束时会再次亮起；
 - **它的权限预设**，可在卡片上切换（Read Only、Workspace Write、Full access，
   以及宿主提供的其它预设），不必打开会话；
 - **排队等待它下一轮的消息**，每条都带队列停靠区自己的 **Steer**（会话运行期间可用）、
   **Edit** 和 **Discard** 操作；
 - **它的模型**，与权限预设同一行即可切换，用的是会话共享的模型目录（输入框的选择器
   和 `/model` 用的正是这一个）；
+- **用量读数**，与权限、模型选择在同一行：已消耗的 token 数、提示缓存命中率，以及
+  上下文窗口占用率；读取的是原生输入区底部所用的同一对 `tokenUsage` 与
+  `contextPressure` 投影；
 - 一个 **remove** 按钮，只把这个会话从本网格上拿掉。
 
 ## 在别处接手这项工作
@@ -183,7 +188,7 @@ Auto review 保留一次就地确认，因为它改变的是每一个请求的�
 cd dsh-session-monitor
 pnpm install
 pnpm check
-scripts/install.sh            # packs dist/dsh-session-monitor-0.1.2.tgz
+scripts/install.sh            # 构建、打包，并打印 tarball 路径
 ```
 
 通过 **Settings → Plugins** 安装这个 tarball（由 CLI 管理的 profile 则用

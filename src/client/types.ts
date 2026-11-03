@@ -181,6 +181,34 @@ export interface QueueRowLike {
   readonly content?: readonly { readonly type?: string; readonly text?: string }[]
 }
 
+/**
+ * The session `tokenUsage` projection: provider-reported usage over the whole
+ * durable log, in four disjoint buckets.
+ */
+export interface TokenUsageLike {
+  /** Prompt tokens billed at full price. */
+  readonly uncachedInputTokens?: number
+  /** Tokens the provider served from its prompt cache (the cache hits). */
+  readonly cacheReadTokens?: number
+  /** Tokens this turn wrote into the cache. */
+  readonly cacheWriteTokens?: number
+  /** Completion tokens, reasoning included. */
+  readonly outputTokens?: number
+}
+
+/**
+ * The session `contextPressure` projection: the newest request's prompt size and
+ * the route's capacity. Absent until a provider reports usage.
+ */
+export interface ContextPressureLike {
+  /** Prompt size of the most recent request. */
+  readonly pressureTokens?: number
+  /** Estimated prompt size of the next request. */
+  readonly projectedTokens?: number
+  /** Newest recorded route capacity, when an adapter advertised one. */
+  readonly contextWindow?: number
+}
+
 /** The session `inbox` projection snapshot. */
 export interface InboxSnapshotLike {
   /** Messages queued for the next turn, in FIFO order. */

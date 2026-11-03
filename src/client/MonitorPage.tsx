@@ -214,6 +214,15 @@ export function MonitorPage({
     return cards
   }, [candidates, prefs.maxCards])
 
+  // A reminder is over once the Session reports no unread completion — a new
+  // run started, or the conversation view opened it. Forget the acknowledgement
+  // then, so the next completion lights the green dot again.
+  useEffect(() => {
+    for (const entry of monitored) {
+      if (!entry.completionUnread) store.clearAcknowledgement(entry.id)
+    }
+  }, [monitored, store])
+
   const waiting = monitored.filter((entry) => entry.state === 'waiting').length
   const running = monitored.filter((entry) => entry.running).length
   const hidden = prefs.hidden.size
@@ -331,6 +340,7 @@ export function MonitorPage({
                 permissionCatalog={permissionCatalog}
                 modelDirectoryFor={modelDirectoryFor}
                 openSession={openSession}
+                acknowledged={prefs.acknowledged.has(entry.id)}
               />
             ))}
           </div>

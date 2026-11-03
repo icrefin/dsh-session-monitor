@@ -33,6 +33,7 @@ describe('parsePrefs', () => {
     for (const raw of [null, '', 'not json', '[]', '"text"', '{"hidden":"no"}']) {
       const prefs = parsePrefs(raw)
       expect(prefs.hidden.size).toBe(0)
+      expect(prefs.acknowledged.size).toBe(0)
       expect(prefs.maxCards).toBe(DEFAULT_MAX_CARDS)
       expect(prefs.columns).toBe(0)
     }
@@ -71,7 +72,12 @@ describe('MonitorStore', () => {
     const store = new MonitorStore(storage)
     store.hide('session-1')
     expect(store.getSnapshot().hidden.has('session-1')).toBe(true)
-    expect(JSON.parse(storage.getItem(STORAGE_KEY) ?? '{}')).toEqual({ hidden: ['session-1'], maxCards: DEFAULT_MAX_CARDS, columns: 0 })
+    expect(JSON.parse(storage.getItem(STORAGE_KEY) ?? '{}')).toEqual({
+      hidden: ['session-1'],
+      acknowledged: [],
+      maxCards: DEFAULT_MAX_CARDS,
+      columns: 0,
+    })
 
     // A fresh store reads what the previous one wrote: removal survives a reload.
     const reloaded = new MonitorStore(storage)
@@ -101,6 +107,27 @@ describe('MonitorStore', () => {
     expect(store.getSnapshot().columns).toBe(0)
     store.setColumns(3)
     expect(new MonitorStore(storage).getSnapshot().columns).toBe(3)
+  })
+
+  it('remembers a clicked completion and forgets it when the next run starts', () => {
+    const storage = new FakeStorage()
+    const store = new MonitorStore(storage)
+    store.acknowledge('session-1')
+    expect(store.getSnapshot().acknowledged.has('session-1')).toBe(true)
+    // The click survives a reload, so the green dot does not come back by itself.
+    expect(new MonitorStore(storage).getSnapshot().acknowledged.has('session-1')).toBe(true)
+
+    store.clearAcknowledgement('session-1')
+    expect(store.getSnapshot().acknowledged.has('session-1')).toBe(false)
+    expect(new MonitorStore(storage).getSnapshot().acknowledged.size).toBe(0)
+  })
+
+  it('ignores an empty id and stays quiet when a reminder is already cleared', () => {
+    const storage = new FakeStorage()
+    const store = new MonitorStore(storage)
+    store.acknowledge('')
+    store.clearAcknowledgement('missing')
+    expect(storage.writes).toBe(0)
   })
 
   it('does not write when the request changes nothing', () => {
