@@ -32,6 +32,26 @@ export const en = {
   restoreAll: 'Restore removed ({count})',
   /** Toolbar: nothing to restore. */
   restoreNone: 'No removed sessions',
+  /** Toolbar: start a session in the chosen Workspace and open it. */
+  newSession: 'New Session',
+  /** Toolbar: accessible name of the Workspace selector beside the button. */
+  newSessionWorkspace: 'Workspace for the new session',
+  /** Toolbar: tooltip of the new-session button. */
+  newSessionHint: 'Start a session in {workspace} and show its card here',
+  /** Toolbar: the session is being created. */
+  newSessionStarting: 'Starting…',
+  /** Toolbar: the folder chooser is open. */
+  newSessionPicking: 'Choosing a folder…',
+  /** Toolbar: the folder is being adopted as a Workspace. */
+  newSessionAdopting: 'Adding workspace…',
+  /** Toolbar: creating the session failed; the reason is the Host's own message. */
+  newSessionFailed: 'The session could not be started: {reason}',
+  /** Toolbar: workspace selector row that opens the folder chooser. */
+  pickFolder: 'Choose a folder…',
+  /** Toolbar: the Workspace selector before the registry has any row. */
+  noWorkspace: 'No workspace yet',
+  /** Workspace display name for the Host's automatic first-use title. */
+  defaultWorkspace: 'Default workspace',
   /** Empty state title. */
   emptyTitle: 'No sessions to monitor',
   /** Empty state body. */
@@ -193,6 +213,16 @@ export const zh: typeof en = {
   auto: '自动',
   restoreAll: '恢复已移除（{count}）',
   restoreNone: '没有已移除的会话',
+  newSession: '新会话',
+  newSessionWorkspace: '新会话所属工作区',
+  newSessionHint: '在「{workspace}」中新建会话，并在此显示卡片',
+  newSessionStarting: '正在创建…',
+  newSessionPicking: '正在选择文件夹…',
+  newSessionAdopting: '正在添加工作区…',
+  newSessionFailed: '无法创建会话：{reason}',
+  pickFolder: '选择文件夹…',
+  noWorkspace: '尚无工作区',
+  defaultWorkspace: '默认工作区',
   emptyTitle: '没有可监视的会话',
   emptyBody: '开始一个新会话，或恢复从这个网格中移除的会话。',
   waiting: '等待你回答',

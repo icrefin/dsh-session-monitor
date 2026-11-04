@@ -45,6 +45,13 @@ export const PANEL_CSS = `
 .dsm-select{height:28px;padding:0 6px;font:inherit;font-size:12px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-module-platform);border:0.5px solid var(--dsw-alias-border-l3);border-radius:8px}
 .dsm-select:focus-visible{outline:2px solid var(--dsw-alias-brand-primary)}
 
+.dsm-newSession{display:flex;align-items:center;gap:6px;flex:none;min-width:0}
+.dsm-newGlyph{display:inline-flex;flex:none;align-items:center;vertical-align:-2px;margin-right:5px}
+.dsm-newWorkspace{flex:0 1 auto;min-width:120px;max-width:220px;color:var(--dsw-alias-label-secondary)}
+.dsm-newStatus{flex:0 1 auto;min-width:0;max-width:44ch;padding:2px 9px;border-radius:999px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);font-size:11px;line-height:16px;overflow-wrap:anywhere}
+.dsm-newStatus[data-tone=error]{color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent)}
+.dsm-divider{flex:none;width:1px;height:16px;margin:0 2px;background:var(--dsw-alias-border-l2)}
+
 .dsm-grid{display:grid;flex:1 1 auto;gap:12px;min-height:0;min-width:0}
 .dsm-card{display:flex;flex-direction:column;box-sizing:border-box;height:100%;min-height:0;overflow:hidden;container-type:inline-size;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}
 .dsm-card[data-state=waiting]{border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,var(--dsw-alias-border-l2))}

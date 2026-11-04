@@ -14,9 +14,11 @@ import {
   autoColumns,
   billedInputTokens,
   cacheHitPercent,
+  collectSessions,
   consumedTokens,
   contextOccupancy,
   DEFAULT_MAX_CARDS,
+  defaultWorkspaceId,
   deriveTranscript,
   displayOrder,
   displayPresetName,
@@ -27,12 +29,13 @@ import {
   permissionLabelKey,
   monitorState,
   newestEventTime,
-  reconcileBudget,
+  orderOrSeed,
   reconcileOrder,
   relativeLabel,
   selectMonitored,
   sessionTitle,
   summarizeArguments,
+  workspaceLabel,
   workspaceTitles,
   type TranscriptRow,
 } from '../src/client/model.ts'
@@ -219,10 +222,12 @@ describe('selectMonitored', () => {
       row('a', { cwd: '/work/project-a' }),
       row('b', { cwd: '/work/project-b' }),
     ])
-    const picked = selectMonitored(list, undefined, new Set(), 9, [
-      { workspaceId: 'w1', title: 'Release notes', sessionIds: ['a'] },
-      { workspaceId: 'w2', title: '  ', sessionIds: ['b'] },
-    ])
+    const picked = selectMonitored(list, undefined, new Set(), 9, {
+      workspaces: [
+        { workspaceId: 'w1', title: 'Release notes', sessionIds: ['a'] },
+        { workspaceId: 'w2', title: '  ', sessionIds: ['b'] },
+      ],
+    })
     expect(picked.find((entry) => entry.id === 'a')?.workspace).toBe('Release notes')
     expect(picked.find((entry) => entry.id === 'b')?.workspace).toBe('work/project-b')
   })
@@ -234,6 +239,80 @@ describe('selectMonitored', () => {
       { title: 'No members' },
     ])]).toEqual([['a', 'Alpha'], ['b', 'Alpha']])
     expect(workspaceTitles(undefined).size).toBe(0)
+  })
+
+  it('replaces the automatic Workspace title with the localized name', () => {
+    expect(workspaceLabel('default-workspace', 'Default workspace')).toBe('Default workspace')
+    expect(workspaceLabel('Release notes', 'Default workspace')).toBe('Release notes')
+    expect(workspaceLabel('  ', 'Default workspace')).toBeUndefined()
+    expect(workspaceLabel(undefined)).toBeUndefined()
+    // Without a fallback the sentinel stays verbatim instead of turning blank.
+    expect(workspaceLabel('default-workspace')).toBe('default-workspace')
+
+    const [card] = collectSessions(
+      catalog([row('a', { cwd: '/work/project-a' })]),
+      undefined,
+      new Set(),
+      {
+        workspaces: [{ workspaceId: 'w1', title: 'default-workspace', sessionIds: ['a'] }],
+        defaultWorkspaceTitle: 'Default workspace',
+      },
+    )
+    expect(card?.workspace).toBe('Default workspace')
+  })
+
+  it('shows a spawned blank session as a card, with the localized title', () => {
+    const list = catalog([
+      row('created', { blank: true, updatedAt: 5_000 }),
+      row('ordinary', { updatedAt: 1_000 }),
+    ])
+    // A blank session stays out of the grid unless this panel created it.
+    expect(collectSessions(list, undefined, new Set()).map((entry) => entry.id)).toEqual(['ordinary'])
+    const picked = collectSessions(list, undefined, new Set(), {
+      spawned: new Set(['created']),
+      blankTitle: 'New Session',
+    })
+    expect(picked.map((entry) => entry.id)).toEqual(['created', 'ordinary'])
+    expect(picked[0]?.title).toBe('New Session')
+    expect(picked[0]?.state).toBe('idle')
+    // A hidden id stays hidden even when it was created here.
+    expect(
+      collectSessions(list, undefined, new Set(['created']), {
+        spawned: new Set(['created']),
+        blankTitle: 'New Session',
+      }).map((entry) => entry.id),
+    ).toEqual(['ordinary'])
+  })
+
+  it('defaults a new session to the most recently used Workspace', () => {
+    const list = catalog([
+      row('a', { updatedAt: 10 }),
+      row('b', { updatedAt: 50 }),
+      row('c', { updatedAt: 5 }),
+    ])
+    const items = [
+      { workspaceId: 'w1', sessionIds: ['a'] },
+      { workspaceId: 'w2', sessionIds: ['b'] },
+      { workspaceId: 'w3', sessionIds: [] as string[] },
+    ]
+    // The remembered choice outranks recency while it still exists.
+    expect(defaultWorkspaceId(items, list, 'w3')).toBe('w3')
+    expect(defaultWorkspaceId(items, list, undefined)).toBe('w2')
+    // A Workspace that no longer exists is not a choice, and no registry has no default.
+    expect(defaultWorkspaceId(items, list, 'gone')).toBe('w2')
+    expect(defaultWorkspaceId([], list, undefined)).toBeUndefined()
+    expect(defaultWorkspaceId(undefined, list, undefined)).toBeUndefined()
+  })
+
+  it('prefers an occupied Workspace when no catalog ranks its sessions', () => {
+    const items = [
+      { workspaceId: 'w1', sessionIds: [] as string[] },
+      { workspaceId: 'w2', sessionIds: ['b'] },
+    ]
+    expect(defaultWorkspaceId(items, undefined, undefined)).toBe('w2')
+    // Host order is the last tie-break; a row without an id is never chosen.
+    expect(defaultWorkspaceId([{ workspaceId: 'w9', sessionIds: [] as string[] }], undefined, undefined)).toBe('w9')
+    expect(defaultWorkspaceId([{ title: 'No id' }], undefined, undefined)).toBeUndefined()
   })
 
   it('returns nothing without a catalog', () => {
@@ -466,14 +545,30 @@ describe('frozen grid order', () => {
 
   it('gives a new session the slot of the least recently used card on a full grid', () => {
     const candidates = [card('a', 10), card('b', 30), card('c', 20), card('d', 40)]
-    // `a` is the oldest at index 0; the new card takes that slot in place.
-    expect(reconcileOrder(['a', 'b', 'c'], candidates, 3)).toEqual(['d', 'b', 'c'])
+    // `a` is the oldest at index 0; the new card takes that slot in place, and
+    // the displaced card stays known at the tail, where the budget hides it.
+    expect(reconcileOrder(['a', 'b', 'c'], candidates, 3)).toEqual(['d', 'b', 'c', 'a'])
+    expect(displayOrder(['d', 'b', 'c', 'a'], candidates, 3)).toEqual(['d', 'b', 'c'])
+  })
+
+  it('does not let a displaced card push another card out on the next reconcile', () => {
+    const candidates = [card('a', 10), card('b', 30), card('c', 20), card('d', 40)]
+    const first = reconcileOrder(['a', 'b', 'c'], candidates, 3)
+    // A card dropped from the order would look like a new arrival and evict `c`
+    // next time; keeping it at the tail makes the grid stable.
+    expect(reconcileOrder(first, candidates, 3)).toEqual(first)
+    expect(displayOrder(reconcileOrder(first, candidates, 3), candidates, 3)).toEqual([
+      'd',
+      'b',
+      'c',
+    ])
   })
 
   it('never displaces a waiting card, replacing the oldest ordinary one instead', () => {
     const candidates = [card('a', 5, 'waiting'), card('b', 30), card('c', 40)]
     // Measured by index: `a` stays at 0 while `b` (ordinary, index 1) yields.
-    expect(reconcileOrder(['a', 'b'], candidates, 1)).toEqual(['a', 'c'])
+    expect(reconcileOrder(['a', 'b'], candidates, 1)).toEqual(['a', 'c', 'b'])
+    expect(displayOrder(['a', 'c', 'b'], candidates, 1)).toEqual(['a', 'c'])
   })
 
   it('keeps the frozen order when the budget shrinks, and reveals it again when it grows', () => {
@@ -489,14 +584,27 @@ describe('frozen grid order', () => {
     expect(displayOrder(['a', 'b', 'c'], candidates, 1)).toEqual(['a', 'b'])
   })
 
-  it('re-ranks when the budget shrinks, so the newest sessions stay', () => {
+  it('never re-ranks when the budget shrinks: it hides the tail and keeps the rest in place', () => {
     const candidates = [card('a', 10), card('b', 20), card('c', 30)]
-    expect(reconcileBudget(['a', 'b', 'c'], candidates, 3, 2)).toEqual(['c', 'b', 'a'])
+    // Activity says c is the newest, but a smaller budget must not move anyone:
+    // the frozen positions stay and only the shown prefix shrinks.
+    const order = orderOrSeed(['a', 'b', 'c'], candidates, 2)
+    expect(order).toEqual(['a', 'b', 'c'])
+    expect(displayOrder(order, candidates, 2)).toEqual(['a', 'b'])
+    // Raising it again reveals the same tail, in place.
+    expect(displayOrder(order, candidates, 3)).toEqual(['a', 'b', 'c'])
   })
 
-  it('keeps the order when the budget grows and appends what is not shown yet', () => {
+  it('seeds by precedence only when no order is stored, then keeps the stored order', () => {
     const candidates = [card('a', 10), card('b', 20), card('c', 30)]
-    expect(reconcileBudget(['b', 'a'], candidates, 2, 3)).toEqual(['b', 'a', 'c'])
+    expect(orderOrSeed([], candidates, 3)).toEqual(['c', 'b', 'a'])
+    // A stored order wins over recency, which is what keeps a remount still.
+    expect(orderOrSeed(['a', 'c', 'b'], candidates, 3)).toEqual(['a', 'c', 'b'])
+  })
+
+  it('appends a session that is not in the stored order while there is room', () => {
+    const candidates = [card('a', 10), card('b', 20), card('c', 30)]
+    expect(orderOrSeed(['b', 'a'], candidates, 3)).toEqual(['b', 'a', 'c'])
   })
 
   it('drops a displayed session that disappeared and leaves the rest in place', () => {

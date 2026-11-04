@@ -632,7 +632,13 @@ export function SessionCard({
   }
 
   return (
-    <article className="dsm-card" data-state={state} aria-label={session.title} onClick={acknowledge}>
+    <article
+      className="dsm-card"
+      data-state={state}
+      data-session-id={session.id}
+      aria-label={session.title}
+      onClick={acknowledge}
+    >
       <header className="dsm-cardHead">
         <span className="dsm-dot" data-state={state} aria-hidden="true" />
         <div className="dsm-cardHeadText">

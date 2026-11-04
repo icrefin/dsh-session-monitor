@@ -50,6 +50,12 @@ DeepSeek Harness 一次只显示一个会话。几个会话并行工作时，侧
   `contextPressure` 投影；
 - 一个 **remove** 按钮，只把这个会话从本网格上拿掉。
 
+工具栏还能**新建会话**：一个 **New Session** 按钮，旁边带工作区下拉框。选好会话该在哪个
+工作区，点按钮，卡片就会出现在网格里，**监控面板不会关闭，别的卡片也不会动**：还有空位时
+从末尾加入，网格已满时接替最旧那张卡的位置。下拉框的最后一行 **Choose a folder…** 会打开
+宿主的文件夹选择器，先把选中的目录接纳为新的工作区，这样你就能在侧边栏还没列出的文件夹里
+开始一个会话。选过的工作区会在这个浏览器里记住。
+
 ## 在别处接手这项工作
 
 这个目录里有一份 [HANDOFF.md](./HANDOFF.md)：当前状态、架构及其确切的数据来源、活性
@@ -58,14 +64,17 @@ DeepSeek Harness 一次只显示一个会话。几个会话并行工作时，侧
 ## 卡片网格
 
 - **哪些会话。** 客户端目录里所有非空白的根会话。子 agent 的子行和临时的 New Session
-  行，都不是需要在这里监控的会话。
-- **卡片一上屏，顺序就冻结。** 网格只在开始时排一次序（等待 → 运行 → 最近使用）。
-  此后，一条提示词、一个新回合或一次状态变化，只更新卡片内容，绝不改变它的位置——
-  刚刚变成最活跃的会话不会跳到最前面。后来出现的会话在还有空位时从末尾加入；网格已满
-  时，它接替**最久未使用**那张卡的位置，其余卡片原地不动。等待中的卡片永远不会被挤掉。
-- **卡片预算变化是唯一另一种重排。** 调小卡片数量，等于用户想看最新的会话，所以网格
-  会先重新排序（等待 → 运行 → 最近使用），再按较小的预算应用。调大则从不重排：冻结的
-  顺序保持不变，只是显示出更多。
+  行，都不是需要在这里监控的会话——只有这个工具栏刚刚创建的那条空白会话例外：在它的第一轮
+  给它标题之前，它的卡片正是用户要的那一张。
+- **卡片一上屏，顺序就冻结。** 网格只在开始时排一次序（等待 → 运行 → 最近使用），然后
+  把它存进 `localStorage`。此后，一条提示词、一个新回合或一次状态变化，只更新卡片内容，
+  绝不改变它的位置——刚刚变成最活跃的会话不会跳到最前面，离开面板或重启应用也会恢复同样的
+  格子，而不是重新排一遍。一张卡片会一直待在自己的位置，直到它成为**最旧**的那张、并且有
+  新会话需要这个位置：新来者接替的正是这个格子，被挤下的卡片留在顺序的尾部。后来出现的
+  会话在还有空位时从末尾加入。等待中的卡片永远不会被挤掉。由这个工具栏创建的会话遵循同样的
+  规则，所以开始一个会话永远不会打乱页面。
+- **没有任何控件会重排网格。** 调小卡片预算只是把冻结顺序的尾部藏起来，调大又把同一段尾部
+  原地显出来；什么都不重新排序，所以卡片绝不会因为活动或一次设置改动而换格子。
 - **卡片预算。** 工具栏为闲置和运行中的会话提供 3–16 张卡片（默认 9 张）。**正在等待
   用户的会话永远不会被预算截掉**——那正是这个面板存在的理由。
 - **每行卡片数。** 工具栏的 **Per row** 控件可以指定确切数量（2–6），也可以让网格留在
@@ -73,6 +82,15 @@ DeepSeek Harness 一次只显示一个会话。几个会话并行工作时，侧
 - **移除。** 被移除的 id 存在本浏览器的 `localStorage`
   （`dsh-session-monitor:prefs`）里。被移除的会话继续运行、保留历史、留在侧边栏；只有
   这个网格忘了它。工具栏的 **Restore removed** 按钮会把它们全部找回来。
+- **开始一个会话。** 工具栏的 **New Session** 按钮调用
+  `ctx.sessions.create({ workspaceId })`，并且保持监控面板打开：宿主返回新会话的 id，页面
+  把它记作一张*刚创建的空白卡片*，下一次核对就把它的卡片放好——还有空位时放在末尾，网格已满
+  时放进最旧卡片的位置。这张卡片标题是 "New Session"，带着平常的输入框，所以第一条提示词
+  就在这里输入。下拉框默认选最近使用过的会话所在的工作区，你上一次选的工作区会和被移除的 id
+  一起记在 `localStorage` 里。**Choose a folder…** 是同一个下拉框里的一行：它调用宿主的
+  文件夹选择器，把该目录接纳为工作区（`ctx.workspaces.create({ path })`），并在那里创建
+  会话。取消选择器什么也不改，被拒绝的启动会在工具栏上用宿主自己的消息报告出来。缺少会话
+  创建能力的组合完全不渲染新建会话控件，缺少文件夹选择器时这一行也不出现。
 - **一张卡片，一条流。** 卡片在挂载期间持有一个 Session 引用
   （`ctx.sessions.retain()`），卸载时释放，所以网格打开多少张卡片，就正好打开多少条
   历史流，离开面板时全部关闭。
@@ -100,6 +118,10 @@ DeepSeek Harness 一次只显示一个会话。几个会话并行工作时，侧
 | 打开会话 | `ctx.uiWorkspace.openSession(sessionId)` |
 | 当前模型与目录 | `ctx.modelDirectories.directoryFor(sessionId)` |
 | 切换模型 | 同一目录的 `select({ provider, model })` |
+| 就地创建会话 | `ctx.sessions.create({ workspaceId })`（回退到 `ctx.uiWorkspace.connectWorkspace`） |
+| 把刚创建的空白会话保留为卡片 | 监控面板在本浏览器 `localStorage` 里的 `spawned` 集合 |
+| 把文件夹接纳为工作区 | `ctx.workspaces.create({ path })` |
+| 请求选择文件夹 | `ctx.remote.directoryPicker.pick()` |
 
 **为什么能在另一个会话的卡片上作答。** 内置的批准面板和问答面板会把请求发布到统一的
 pending-interaction 投影里，两个载体（`PendingApproval`、`PendingQuestion`）都暴露了
@@ -129,16 +151,28 @@ Auto review 保留一次就地确认，因为它改变的是每一个请求的�
 空间），所以在卡片上切换的模型，就是输入框和 `/model` 接下来看到的那个。带推理强度声明
 的模型会以它的默认强度切换；卡片本身没有强度行。
 
+**为什么新建会话不会打开对话。** 监控面板的意义就是同时看着几个会话；一次把视图带走的点击
+正好破坏这一点。所以工具栏调用 `ctx.sessions.create({ workspaceId })`，留下宿主返回的 id。
+全新会话是*空白*的，网格本来会把它过滤掉，于是这个 id 被记进本浏览器的 `spawned` 集合，
+`collectSessions` 会在这条空白行有真实标题之前，把它保留为一张标题是 "New Session" 的卡片。
+之后这张卡片像任何新来者一样进入冻结的顺序——这正是网格其余部分保持不动的原因。被挤下的
+卡片留在顺序尾部，而不是被丢掉；否则它在下一次核对时会被当成新来者，挤掉另一张卡片，网格
+就会来回抖动。缺少 `sessions.create` 的组合回退到
+`ctx.uiWorkspace.connectWorkspace(workspaceId)`，它同样只创建、不跳转（可能会复用一条空白
+会话）。两个服务都是可选的、通过反射读取（`ctx.get(...)`），所以在两者都不存在的组合里，
+面板照常挂载，只是渲染不出新建会话控件。
+
 **一处已知的边界。** 被路由到另一个浏览器标签页的问答（或前台声明已经结束的问答）会拒绝
 在这里作答（`no channel accepts an answer yet`）；卡片会如实说明，而不是假装回答已被接受。
 
 ## 值得说明的设计取舍
 
 - **首次绘制之后顺序就冻结。** 内置 Session 行用的同一套优先级（待处理 → 进行中 →
-  已完成 → 闲置）只用来决定网格的初始顺序；卡片一旦显示，活动就不许移动它。这正是你给某个会话
-  发提示词时，正在看的那张卡片留在原地的原因；也正因为如此，新会话会接替最久未使用那张
-  卡的位置，而不是把别的卡片全往下挤。唯一有意的例外是**更小的卡片预算**：那意味着用户
-  想要最新的会话，所以网格会先重排，再应用它。
+  已完成 → 闲置）只用来决定网格的初始顺序；卡片一旦显示，活动就不许移动它——顺序还被存了
+  下来，所以重挂载或重启应用也不会重新排一遍。这正是你给某个会话发提示词时，正在看的那张
+  卡片留在原地的原因；也正因为如此，新会话会接替最久未使用那张卡的位置，而不是把别的卡片
+  全往下挤。没有例外：**更小的卡片预算**只是把顺序的尾部藏起来，调大时同样的卡片回到同样
+  的格子。
 - **工作区标题是卡片的第二行，用正文颜色。** 它来自工作区注册表，而不是 `cwd` 字符串，
   所以重命名过的工作区会显示它的名字；原始路径仍作为悬停提示保留。状态和时间紧随其后，
   用弱化的说明文字颜色，状态圆点让人一眼看出状态。
@@ -172,11 +206,13 @@ Auto review 保留一次就地确认，因为它改变的是每一个请求的�
 
 ## 验证结果
 
-- `pnpm check`——两半与测试的类型检查、构建出的 bundle，然后跑测试：**97 个测试**，
+- `pnpm check`——两半与测试的类型检查、构建出的 bundle，然后跑测试：**130 个测试**，
   包括用 jsdom 把真实页面挂到假投影上（排序、实时窗口、问答作答、发送提示词、移除、
-  打开失败、长回答完整渲染）、一道样式表守卫（每个渲染出的 class 都有规则；没有字面
-  颜色），以及在假模块加载器后面执行**构建产物**（bundle id、导出、真实的 `apply`
-  接线、没有第二份 React）。
+  打开失败、长回答完整渲染、新建会话控件的默认工作区、它的启动调用、文件夹接纳、被取消的
+  选择器和被拒绝的启动）、新建的空白会话在页面上接替最旧卡片的位置而不跳转、卡片在面板
+  重挂载与重新加载后保持原格、更小的预算藏起顺序尾部而不重排、`pending` 目录不动已存的
+  顺序、一道样式表守卫（每个渲染出的 class 都有规则；没有字面颜色），以及在假模块加载器
+  后面执行**构建产物**（bundle id、导出、真实的 `apply` 接线、没有第二份 React）。
 - `scripts/dev-profile.sh`——一个隔离的 profile 能启动这一行，并伺服
   `/plugins/dsh-session-monitor/client.js`。
 - 未验证：面板的实际像素。本次会话没有浏览器控制，所以视觉检查（浅色/深色、窄宽度下的卡片
@@ -199,16 +235,17 @@ scripts/install.sh            # 构建、打包，并打印 tarball 路径
 ## 目录结构
 
 ```
-src/index.ts               host half: identity only, registers nothing
-src/client/index.tsx       sidebar row + main page registration
-src/client/MonitorPage.tsx grid, toolbar, card selection
-src/client/SessionCard.tsx one card: header, transcript, pending, composer
-src/client/InteractionCard.tsx question/approval answer block
-src/client/model.ts        which sessions, what happened (pure)
-src/client/store.ts        removed ids + card budget (localStorage)
-src/client/useSessionFeed.ts retain/follow/release one session
-src/client/styles.ts       theme-token stylesheet
-test/                      model, store, manifest, page (jsdom), built bundle
+src/index.ts                     host half: identity only, registers nothing
+src/client/index.tsx             sidebar row + main page registration
+src/client/MonitorPage.tsx       grid, toolbar, card selection
+src/client/NewSessionControl.tsx new-session button + Workspace drop-down
+src/client/SessionCard.tsx       one card: header, transcript, pending, composer
+src/client/InteractionCard.tsx   question/approval answer block
+src/client/model.ts              which sessions, what happened (pure)
+src/client/store.ts              removed ids + card budget (localStorage)
+src/client/useSessionFeed.ts     retain/follow/release one session
+src/client/styles.ts             theme-token stylesheet
+test/                            model, store, manifest, page (jsdom), built bundle
 ```
 
 ## 贡献

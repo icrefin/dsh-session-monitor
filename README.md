@@ -55,6 +55,14 @@ Each card carries, for a session you are **not** viewing:
   `contextPressure` projections the native composer footer uses;
 - a **remove** button that takes the session off this grid only.
 
+The toolbar also **starts sessions**: a **New Session** button with a Workspace
+drop-down beside it. Pick where the session belongs, click the button, and its
+card appears **while the monitor stays open and no other card moves**: with room
+it joins at the end, and on a full grid it takes the oldest card's slot. The drop-down's last row, **Choose a
+folder…**, opens the host's folder chooser and adopts the picked directory as a
+new Workspace first, so you can start a session in a folder the sidebar does not
+list yet. The chosen Workspace is remembered in this browser.
+
 ## Picking this up elsewhere
 
 This directory carries a [HANDOFF.md](./HANDOFF.md): current state, the architecture and its exact
@@ -65,18 +73,23 @@ steps. Read it before changing behaviour.
 
 - **Which sessions.** Every non-blank root session in the client catalog.
   Subagent child rows and the provisional New Session row are not conversations
-  a person monitors here.
+  a person monitors here — except the blank session this toolbar just created,
+  whose card is exactly what the user asked for until its first turn titles it.
 - **The order freezes once cards are on screen.** The grid seeds its order one
-  time (waiting, then running, then recency). After that, a prompt, a new turn or
-  a state change updates a card's content but never its position — a session that
-  becomes the most recently active does not jump to the front. A session that
-  appears later joins at the end while there is room; on a full grid it takes the
-  slot of the **least recently used** card, so every other card stays put. A
-  waiting card is never displaced.
-- **A budget change is the only other reorder.** Shrinking the card count is the
-  user asking for the newest sessions, so the grid re-ranks (waiting, then
-  running, then recency) before applying the smaller budget. Raising it never
-  reorders: the frozen order stays and simply shows more of it.
+  time (waiting, then running, then recency) and then stores it in `localStorage`.
+  After that, a prompt, a new turn or a state change updates a card's content but
+  never its position — a session that becomes the most recently active does not
+  jump to the front, and leaving the panel or restarting the app resumes the same
+  cells instead of re-seeding them. A card keeps its position until it is the
+  **oldest** card and a new session needs that slot: the newcomer takes that exact
+  cell and the displaced card waits at the order's tail. A session that appears
+  later joins at the end while there is room. A waiting card is never displaced. A
+  session created by this toolbar follows the same rule, so starting one never
+  reshuffles the page.
+- **No control reorders the grid.** A smaller card budget hides the tail of the
+  frozen order and raising it reveals that same tail again, in place; nothing is
+  re-ranked, so a card never changes cells because of activity or a settings
+  change.
 - **Card budget.** The toolbar shows 3–16 cards (default 9) for idle and running
   sessions. A session **waiting for the user is never cut off by the budget** —
   it is the reason the panel exists.
@@ -87,6 +100,20 @@ steps. Read it before changing behaviour.
   (`dsh-session-monitor:prefs`). A removed session keeps running, keeps its
   history and stays in the sidebar; only this grid forgets it. The toolbar's
   **Restore removed** button brings every one of them back.
+- **Starting a session.** The toolbar's **New Session** button calls
+  `ctx.sessions.create({ workspaceId })` and keeps the monitor open: the Host
+  returns the new session id, the page records it as a *spawned blank*, and the
+  next reconcile places its card — at the end while there is room, or in the
+  oldest card's slot on a full grid. The card is titled "New Session" and carries
+  the normal composer, so the first prompt is typed there. The drop-down defaults to the Workspace of the most recently used
+  session, and the Workspace you last chose is remembered in `localStorage`
+  beside the removed ids. **Choose a folder…** is a row of that same drop-down: it
+  calls the host's folder chooser, adopts the directory as a Workspace
+  (`ctx.workspaces.create({ path })`) and creates the session there. A cancelled
+  chooser changes nothing, and a refused start is reported in the toolbar with the
+  host's own message. A composition with no session-creation verb renders no
+  new-session control at all, and the folder row is absent when no folder chooser
+  is composed.
 - **One card, one stream.** A card holds a Session reference
   (`ctx.sessions.retain()`) while it is mounted and releases it on unmount, so the
   grid opens exactly as many history streams as it shows cards, and leaving the
@@ -116,6 +143,10 @@ because every fact it needs already exists in the client:
 | open the session | `ctx.uiWorkspace.openSession(sessionId)` |
 | current model and catalog | `ctx.modelDirectories.directoryFor(sessionId)` |
 | switch the model | the same directory's `select({ provider, model })` |
+| create a session in place | `ctx.sessions.create({ workspaceId })` (fallback `ctx.uiWorkspace.connectWorkspace`) |
+| keep a created blank session as a card | the monitor's local `spawned` set in `localStorage` |
+| adopt a folder as a Workspace | `ctx.workspaces.create({ path })` |
+| ask for a folder | `ctx.remote.directoryPicker.pick()` |
 
 **Why answering works from another session's card.** The shipped approval and
 question panels publish their request into the unified pending-interaction
@@ -156,6 +187,22 @@ caller's context), so a model switched on a card is what the composer and
 `/model` see next. A model with advertised reasoning efforts is switched at its
 default effort; the card has no effort row of its own.
 
+**Why the new session does not open the conversation.** The point of the monitor is
+to keep several sessions in view; a click that navigates away defeats it. The
+toolbar therefore calls `ctx.sessions.create({ workspaceId })` and keeps the id the
+Host returns. Because a brand-new session is *blank*, the grid would normally
+filter it out, so the id is recorded in this browser's `spawned` set and
+`collectSessions` keeps the blank row as a card (titled "New Session") until its
+first turn gives it a real title. The card then enters the frozen order like any
+other new arrival, which is what keeps the rest of the grid still. A displaced
+card stays known at the order's tail rather than being dropped; otherwise it would
+look like a new arrival on the next reconcile and evict another card, and the grid
+would churn. A composition without `sessions.create` falls back to
+`ctx.uiWorkspace.connectWorkspace(workspaceId)`, which also creates without
+navigating (it may reuse a blank session). Both services are optional and read
+reflectively (`ctx.get(...)`), so the panel still mounts — and simply renders no
+new-session control — where neither exists.
+
 **One known boundary.** A question routed to a different browser tab (or one
 whose foreground claim ended) refuses an answer made here
 (`no channel accepts an answer yet`); the card says so rather than pretending the
@@ -165,11 +212,12 @@ answer was accepted.
 
 - **The order is frozen after the first paint.** Same precedence the shipped
   Session rows use (pending → ongoing → finished → idle) only seeds the grid; once
-  a card is displayed, activity must not move it. That is what keeps a card you
-  are watching where you left it when you send it a prompt, and it makes a new
+  a card is displayed, activity must not move it — and the order is stored, so a
+  remount or an app restart does not re-seed it either. That is what keeps a card
+  you are watching where you left it when you send it a prompt, and it makes a new
   session take the least recently used card's slot instead of pushing everything
-  down. The one deliberate exception is a **smaller card budget**: that is the user
-  asking for the newest sessions, so the grid re-ranks before applying it.
+  down. There is no exception: a **smaller card budget** only hides the order's
+  tail, and raising it shows the same cards in the same cells.
 - **The Workspace title is the card's second line, in normal text colour.** It comes from the Workspace registry,
   not from the `cwd` string, so a renamed Workspace shows its name; the raw path stays a tooltip. State and time
   follow it in the muted caption colour, and the status dot repeats the state at a glance.
@@ -210,12 +258,17 @@ answer was accepted.
 ## Verified
 
 - `pnpm check` — typecheck of both halves and the tests, the built bundle, then
-  the test run: **97 tests**, including a jsdom mount of the real page against
+  the test run: **130 tests**, including a jsdom mount of the real page against
   fake projections (ordering, live window, question answer, prompt send, removal,
-  open failure, a long answer rendered whole), a stylesheet guard (every rendered
-  class has a rule; no literal colours), and an execution of the **built** bundle
-  behind a fake module loader (bundle id, exports, real `apply` wiring, no second
-  React).
+  open failure, a long answer rendered whole, the new-session control's default
+  Workspace, its start call, folder adoption, a cancelled chooser and a refused
+  start), a created blank session taking the oldest card's slot on the page
+  without navigating, a card keeping its cell across a panel remount and a reload,
+  a smaller card budget hiding the order's tail instead of re-ranking it, a
+  `pending` catalog leaving the stored order alone, a stylesheet guard (every
+  rendered class has a rule; no literal colours), and an execution of the **built**
+  bundle behind a fake module loader (bundle id, exports, real `apply` wiring, no
+  second React).
 - `scripts/dev-profile.sh` — an isolated profile boots the row and serves
   `/plugins/dsh-session-monitor/client.js`.
 - Not verified: the panel's pixels. This session had no browser control, so the
@@ -239,16 +292,17 @@ imported at the next start.
 ## Layout
 
 ```
-src/index.ts               host half: identity only, registers nothing
-src/client/index.tsx       sidebar row + main page registration
-src/client/MonitorPage.tsx grid, toolbar, card selection
-src/client/SessionCard.tsx one card: header, transcript, pending, composer
-src/client/InteractionCard.tsx question/approval answer block
-src/client/model.ts        which sessions, what happened (pure)
-src/client/store.ts        removed ids + card budget (localStorage)
-src/client/useSessionFeed.ts retain/follow/release one session
-src/client/styles.ts       theme-token stylesheet
-test/                      model, store, manifest, page (jsdom), built bundle
+src/index.ts                     host half: identity only, registers nothing
+src/client/index.tsx             sidebar row + main page registration
+src/client/MonitorPage.tsx       grid, toolbar, card selection
+src/client/NewSessionControl.tsx new-session button + Workspace drop-down
+src/client/SessionCard.tsx       one card: header, transcript, pending, composer
+src/client/InteractionCard.tsx   question/approval answer block
+src/client/model.ts              which sessions, what happened (pure)
+src/client/store.ts              removed ids + card budget (localStorage)
+src/client/useSessionFeed.ts     retain/follow/release one session
+src/client/styles.ts             theme-token stylesheet
+test/                            model, store, manifest, page (jsdom), built bundle
 ```
 
 ## Contributing

@@ -305,9 +305,20 @@ export interface ModelDirectoryLike {
   select?(selection: ModelSelectionLike): Promise<UpdateQueueResultLike | undefined>
 }
 
-/** The `ctx.uiWorkspace` face this bundle uses — navigation to one session. */
+/** The `ctx.uiWorkspace` face this bundle uses — navigation and Session creation. */
 export interface UiWorkspaceServiceLike {
   openSession?(sessionId: string): void
+  /**
+   * Create (or reuse a blank) Session in one Workspace without changing the
+   * main view. Used only when the session service cannot create one directly.
+   */
+  connectWorkspace?(workspaceId: string): Promise<string>
+}
+
+/** The folder verbs of the generated `remote.directoryPicker` namespace. */
+export interface DirectoryPickerLike {
+  /** Open the host's native folder chooser; `null` means the operator cancelled. */
+  pick?(signal?: AbortSignal): Promise<RemoteResultLike<string | null>>
 }
 
 /** The `ctx.modelDirectories` service face this bundle uses. */
@@ -336,11 +347,35 @@ export interface WorkspaceViewLike {
 /** The Workspace projection snapshot. */
 export interface WorkspacesSnapshotLike {
   readonly items?: readonly WorkspaceViewLike[]
+  /** `pending` until the first Host baseline arrives. */
+  readonly phase?: string
 }
 
 /** The `ctx.workspaces` service face this bundle uses. */
 export interface WorkspacesServiceLike {
   readonly list?: ObservableSnapshotLike<WorkspacesSnapshotLike>
+  /** Adopt (or resolve) one absolute directory as a Workspace. */
+  create?(input: { readonly path: string }): Promise<WorkspaceViewLike>
+}
+
+/**
+ * The verbs the toolbar's new-session control needs.
+ *
+ * `start` is the only required verb: a composition that can create a Session in
+ * a Workspace but cannot reach a folder picker still gets a working button, and
+ * the folder row is then simply absent.
+ */
+export interface NewSessionActionsLike {
+  /**
+   * Create a session in one Workspace without leaving the monitor.
+   * @returns the id of the Session the Host actually used, so the page can show
+   *   its card in place of the oldest one.
+   */
+  start(workspaceId: string): Promise<string>
+  /** Adopt one absolute folder as a Workspace. */
+  readonly createWorkspace?: (path: string) => Promise<WorkspaceViewLike>
+  /** Ask the host for a folder; resolves to `null` when the operator cancels. */
+  readonly pickFolder?: () => Promise<string | null>
 }
 
 /** The `ctx.sessions` service face this bundle uses. */
@@ -349,6 +384,16 @@ export interface SessionsServiceLike {
   retain?(target: string, options: { readonly source: string; readonly signal?: AbortSignal }): SessionReferenceLike
   /** Ask the Host for a fresh catalog baseline (metadata read only). */
   refresh?(): Promise<unknown>
+  /**
+   * Create a Session in one Workspace (or directory), reusing a named blank.
+   * @returns the id of the Session the Host actually used.
+   */
+  create?(options: {
+    readonly workspaceId?: string
+    readonly cwd?: string
+    readonly sessionId?: string
+    readonly agentPreset?: string
+  }): Promise<string>
 }
 
 /** The `ctx.uiSession` service face this bundle uses. */

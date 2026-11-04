@@ -34,12 +34,15 @@ import { resolveRemote } from './remote.ts'
 import { MonitorStore } from './store.ts'
 import { injectStyles } from './styles.ts'
 import type {
+  DirectoryPickerLike,
   ModelDirectoriesServiceLike,
   ModelDirectoryLike,
+  NewSessionActionsLike,
   RemoteServiceLike,
   SessionsServiceLike,
   UiSessionServiceLike,
   UiWorkspaceServiceLike,
+  WorkspaceViewLike,
   WorkspacesServiceLike,
 } from './types.ts'
 
@@ -96,6 +99,23 @@ interface OptionalScope {
 }
 
 /**
+ * Read one optional service without letting its absence or a throwing accessor
+ * take the panel down.
+ * @param ctx - client root context.
+ * @param name - service name, including a Remote namespace's dotted name.
+ * @param label - human-readable name for the warning.
+ * @returns the service, or `undefined`.
+ */
+function readService<T>(ctx: ClientContext, name: string, label: string): T | undefined {
+  try {
+    return ctx.get?.(name) as T | undefined
+  } catch (error) {
+    console.warn(`[dsh-session-monitor] ${label} could not be read`, error)
+    return undefined
+  }
+}
+
+/**
  * Register the sidebar row and the page it opens.
  * @param ctx - client root context carrying the slot and locale services.
  */
@@ -125,20 +145,19 @@ export function apply(ctx: ClientContext): void {
       console.warn('[dsh-session-monitor] the model directory service could not be watched', error)
     }
     /**
-     * Navigation lives in the optional `uiWorkspace` service, read reflectively
-     * because this bundle does not require it: a composition without it still
-     * mounts the panel, and the card titles simply are not links there. The read
+     * Navigation and Session creation live in the optional `uiWorkspace`
+     * service, read reflectively because this bundle does not require it: a
+     * composition without it still mounts the panel, the card titles are simply
+     * not links there, and the toolbar renders no new-session control. The read
      * happens when the page mounts (inside the injection face), after every
      * service in the Web composition has registered.
      */
     const openSessionFor = (): ((sessionId: string) => void) | undefined => {
-      let uiWorkspace: UiWorkspaceServiceLike | undefined
-      try {
-        uiWorkspace = ctx.get?.('uiWorkspace') as UiWorkspaceServiceLike | undefined
-      } catch (error) {
-        console.warn('[dsh-session-monitor] the workspace navigation service could not be read', error)
-        return undefined
-      }
+      const uiWorkspace = readService<UiWorkspaceServiceLike>(
+        ctx,
+        'uiWorkspace',
+        'the workspace navigation service',
+      )
       if (uiWorkspace?.openSession === undefined) return undefined
       return (sessionId: string) => {
         try {
@@ -177,6 +196,82 @@ export function apply(ctx: ClientContext): void {
       console.warn('[dsh-session-monitor] the Session services could not be read', error)
     }
 
+    /**
+     * The verbs behind the toolbar's new-session control.
+     *
+     * Nothing here may change the main view: the monitor creates the session in
+     * place and shows its card. `ctx.sessions.create` is the direct path; a
+     * composition without it falls back to `uiWorkspace.connectWorkspace`, which
+     * also creates without navigating. A Workspace can only be adopted when both
+     * the folder chooser and the Workspace registry expose their verb, and the
+     * control is absent when no creation verb exists at all.
+     */
+    const newSessionActionsFor = (): NewSessionActionsLike | undefined => {
+      const uiWorkspace = readService<UiWorkspaceServiceLike>(
+        ctx,
+        'uiWorkspace',
+        'the workspace navigation service',
+      )
+      const folderPicker = readService<DirectoryPickerLike>(
+        ctx,
+        'remote.directoryPicker',
+        'the directory picker',
+      )
+      const workspaces = services.workspaces
+      const sessions = services.sessions
+      const createSession = sessions?.create
+      const connectWorkspace = uiWorkspace?.connectWorkspace
+      if (createSession === undefined && connectWorkspace === undefined) return undefined
+
+      /**
+       * Create one session in a Workspace, without navigation.
+       * @param workspaceId - the Workspace to start in.
+       * @returns the id of the Session the Host used.
+       */
+      const start = async (workspaceId: string): Promise<string> => {
+        const sessionId =
+          createSession !== undefined && sessions !== undefined
+            ? await createSession.call(sessions, { workspaceId })
+            : connectWorkspace !== undefined && uiWorkspace !== undefined
+              ? await connectWorkspace.call(uiWorkspace, workspaceId)
+              : ''
+        if (typeof sessionId !== 'string' || sessionId === '') {
+          throw new Error(`no session was created in workspace ${workspaceId}`)
+        }
+        return sessionId
+      }
+
+      // Captured with its receiver: the registry's own method keeps the service
+      // around it, which is what lets the Host trace the call.
+      const createWorkspaceVerb = workspaces?.create
+      const createWorkspace =
+        createWorkspaceVerb === undefined || workspaces === undefined
+          ? undefined
+          : (path: string): Promise<WorkspaceViewLike> => createWorkspaceVerb.call(workspaces, { path })
+
+      const pickFolder =
+        folderPicker?.pick === undefined
+          ? undefined
+          : async (): Promise<string | null> => {
+              const result = await folderPicker.pick!()
+              if (result?.ok !== true) {
+                const message = result?.error?.message
+                throw new Error(
+                  typeof message === 'string' && message !== ''
+                    ? message
+                    : 'the folder chooser failed',
+                )
+              }
+              return typeof result.value === 'string' ? result.value : null
+            }
+
+      return {
+        start,
+        ...(createWorkspace === undefined ? {} : { createWorkspace }),
+        ...(pickFolder === undefined ? {} : { pickFolder }),
+      }
+    }
+
     ctx.effect(
       () =>
         ctx.slots.inject('sidebar.panellist', () =>
@@ -202,7 +297,12 @@ export function apply(ctx: ClientContext): void {
               name: 'main',
               key: PANEL_ID,
               locale: NS,
-              inject: () => ({ store, ...services, openSession: openSessionFor() }),
+              inject: () => ({
+                store,
+                ...services,
+                openSession: openSessionFor(),
+                newSession: newSessionActionsFor(),
+              }),
             },
             MonitorPage,
           ),

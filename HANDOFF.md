@@ -1,6 +1,6 @@
 # Handoff — dsh-session-monitor
 
-**Version:** 0.7.6 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
+**Version:** 0.9.1 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
 **Written:** 2026-11-02 · **Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
 
 This document is for the next person (or agent) picking this work up on **another machine**.
@@ -10,9 +10,9 @@ It records what exists, what was verified, what was not, and what to do next.
 
 ## 1. One-paragraph status
 
-The plugin is feature-complete for its stated purpose and passes `pnpm check` (97 tests, both
+The plugin is feature-complete for its stated purpose and passes `pnpm check` (126 tests, both
 halves typechecked, loader bundle built). It is installed into the **desktop profile** on the
-machine where it was written, currently **0.7.6**; a bundle added to a running profile is inert
+machine where it was written, currently **0.9.1**; a bundle added to a running profile is inert
 until the app restarts, so the panel shows the new build only after a relaunch. The panel has **never been seen in the running GUI**: browser control was unavailable to
 the agent that built it. Layout was checked in a local Vite **component fixture** only. Treat
 in-app visual verification as the first open task.
@@ -30,10 +30,23 @@ in-app visual verification as the first open task.
   (`queue`, or `steer` while running).
 - **Remove** (`×`) hides a card only, persisted in this browser's `localStorage`. A toolbar button
   restores all removed ids.
-- Sort: waiting > running > recency. A waiting session is exempt from the card budget.
+- A toolbar **New Session** button with a **Workspace drop-down** beside it: it creates a session in
+  the chosen Workspace and **keeps the monitor open**. Its card joins at the end while the grid has
+  room, and on a full grid it takes the slot of the oldest (least recently used) card, so the grid
+  keeps its shape and no other card moves. A brand-new
+  session is blank, so its id is recorded in the `spawned` set and its card shows the localized
+  "New Session" title until its first turn titles it. The drop-down's **Choose a folder…** row calls
+  `remote.directoryPicker.pick()`, adopts the folder with `ctx.workspaces.create({ path })` and
+  creates the session there. The last choice is remembered in this browser; a cancelled chooser
+  changes nothing.
+- Seed only: waiting > running > recency decides the first placement. From then on the order is
+  frozen **and stored** in `localStorage` (`prefs.order`), so a panel switch, a reload or a restart
+  resumes the same cells; activity never moves a card, and no control re-ranks the grid (a smaller
+  budget only hides the order's tail). A waiting session is exempt from the card budget.
 
-Non-goals: it does not replace the Conversation, does not show the left/right panes, does not
-render Markdown, and does not create sessions.
+Non-goals: it does not replace the Conversation, does not show the left/right panes, and does not
+render Markdown. It only creates *blank* sessions in place — it does not navigate, fork, archive,
+rename or delete sessions.
 
 ---
 
@@ -46,6 +59,7 @@ render Markdown, and does not create sessions.
 | Browser half | `src/client/index.tsx` | Two slot registrations + locale dictionaries |
 | Sidebar row id | `PANEL_ID = dshSessionMonitor` | Must equal the `main` slot key |
 | Panel page | `src/client/MonitorPage.tsx` | Grid, toolbar, projection reads, catalog refresh |
+| New-session control | `src/client/NewSessionControl.tsx` | Button + Workspace drop-down + folder row |
 | One card | `src/client/SessionCard.tsx` | Header, transcript, pending block, composer |
 | Pending block | `src/client/InteractionCard.tsx` | Answers the carrier |
 | Pure derivations | `src/client/model.ts` | Candidate collection, frozen order reconcile, transcript, grid fit, timestamps |
@@ -76,6 +90,18 @@ The host half is empty on purpose. Every fact and verb already exists in the cli
 | pending question / approval | `ctx.uiSession.sessionStatus` (a `Map`) |
 | answer a pending request | the carrier's own `answer()` method |
 | recover a dead tail | `binding.session.resync()` (duck-typed; not in public `ISession`) |
+| create a session in a Workspace, in place | `ctx.sessions.create({ workspaceId })` (fallback: `ctx.uiWorkspace.connectWorkspace(workspaceId)`) |
+| keep a created blank Session as a card | the monitor's local `spawned` set (`localStorage`) |
+| adopt a folder as a Workspace | `ctx.workspaces.create({ path })` |
+| ask for a folder | `ctx.remote.directoryPicker.pick()` → `RemoteResult<string \| null>` |
+
+The verbs above are **optional** and read reflectively (`ctx.get('uiWorkspace')`,
+`ctx.get('remote.directoryPicker')`). Without a creation verb the page renders no new-session
+control; without a picker the folder row is absent. Creating never navigates: `sessions.create`
+returns the new id, the page marks it spawned, and the next reconcile places its card (end of the
+order while there is room, oldest slot on a full grid).
+`connectWorkspace` is the fallback for a composition without `sessions.create`; it may reuse an
+unused blank session of that Workspace, exactly like the sidebar's own New Session button.
 
 **Retention.** Each card holds one `sessions.retain(id, { source: 'sessionMonitor' })` reference
 while mounted and releases it on unmount. That opens one history/tail stream per card, so the card
@@ -145,11 +171,16 @@ stall with no error state) was observed in a user screenshot.
 `localStorage` key `dsh-session-monitor:prefs`:
 
 ```json
-{ "hidden": ["session-id", "..."], "maxCards": 9, "columns": 0 }
+{ "hidden": ["session-id", "..."], "acknowledged": ["..."], "spawned": ["..."],
+  "maxCards": 9, "columns": 0, "newWorkspaceId": "workspace-id" }
 ```
 
 `columns: 0` means Auto. `maxCards` is clamped 1–16, `columns` 0–6. Removal is local by design:
-a removed session keeps running, keeps history and stays in the sidebar.
+a removed session keeps running, keeps history and stays in the sidebar. `newWorkspaceId` is the
+Workspace the new-session control last used; it is ignored (and replaced) when that Workspace no
+longer exists, and the default is then the Workspace of the most recently used session. `spawned`
+holds at most 32 ids of sessions created here whose first turn has not started; an id leaves the
+set as soon as the catalog reports the row non-blank.
 
 ---
 
@@ -158,14 +189,14 @@ a removed session keeps running, keeps history and stays in the sidebar.
 ```sh
 cd dsh-session-monitor
 pnpm install
-pnpm check            # typecheck host + client + test, build lib/client.js, run 68 tests
-scripts/install.sh    # packs dist/dsh-session-monitor-0.1.12.tgz (builds first)
+pnpm check            # typecheck host + client + test, build lib/client.js, run 126 tests
+scripts/install.sh    # packs dist/dsh-session-monitor-0.9.1.tgz (builds first)
 ```
 
 Install into a CLI-managed profile:
 
 ```sh
-dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.1.12.tgz
+dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.9.1.tgz
 # then restart the server for the row to compose
 ```
 
@@ -174,7 +205,7 @@ Install into the **Electron desktop profile** (the CLI refuses it):
 ```sh
 cd ~/.dsh/profiles/desktop
 # back up package.json / pnpm-lock.yaml / cordis.patch.yml first
-pnpm add file:<abs-path>/dist/dsh-session-monitor-0.1.12.tgz
+pnpm add file:<abs-path>/dist/dsh-session-monitor-0.9.1.tgz
 # add "dsh-session-monitor" to "dsh.profile.bundles" in package.json
 # restart the app (a bundle added to a running profile is inert until then)
 ```
@@ -191,20 +222,31 @@ composition and bundle serving without touching a live profile.
 
 Proven:
 
-- `pnpm check`: 97 tests — model (selection, budget, transcript, live chunks, whole long messages, grid fit, timestamps),
-  store (persistence, clamping, notification), manifest (three ids, activation order, version chip),
+- `pnpm check`: 125 tests — model (selection, budget, transcript, live chunks, whole long messages, grid fit, timestamps,
+  Workspace label/default rules, stable replacement with the displaced card kept at the order tail),
+  store (persistence incl. the remembered new-session Workspace and the spawned-blank set,
+  clamping, notification), manifest (three ids, activation order, version chip),
   stylesheet guard (every rendered class has a rule, token-only colours, content-font tokens),
   jsdom page mount (ordering, live appends, question answer, single-select custom rule, prompt send,
-  removal, open failure, silent-store reconcile, both new recovery triggers), and the **built**
-  bundle behind a fake loader (loader id, exports, real `apply`, no second React).
+  removal, open failure, silent-store reconcile, both new recovery triggers, the new-session
+  control's default Workspace, its start call, folder adoption, a cancelled chooser, a refused
+  start, and a created blank card taking the oldest slot on a full grid), and the **built** bundle
+  behind a fake loader (loader id, exports, real `apply`, no second React).
 - An isolated dsh profile composed the row and served
   `/plugins/??dsh-session-monitor/client.js&rev=…` with HTTP 200.
+- **The panel in a real browser** (headless Chrome driven over CDP against the isolated profile on
+  2026-11-03, version 0.9.0): the sidebar opens the monitor, the toolbar renders, and repeated
+  New Session clicks append cards 1→2→3 with the page still on the monitor. With the card budget
+  set to 3 (a full grid, read from each card's `data-session-id`), the fourth and fifth clicks keep
+  the count at 3 and replace the oldest card's slot each time — `[a,b,c]` → `[d,b,c]` → `[d,e,c]` —
+  so no other card moves. No navigation, no error.
 - Installed `lib/` is byte-identical to the build on the originating machine.
 - Layout in a Vite component fixture with fake data: 9 cards 3×3 and 16 cards 4×4 fit 1440×900,
   9 cards fit 1180×760. Screenshots live in `reports/` (gitignored, not committed).
 
-**Not proven:** the panel inside the real app. No browser control was available. Light/dark,
-real fonts, real session streams, and the waiting-card interactions are unverified by eye.
+**Not proven:** the panel inside the Electron window itself, real fonts/DPI, light/dark on the
+desktop build, real session streams on the cards, and the waiting-card interactions. The browser
+check ran the web app in Chrome, which is the same client bundle but not the desktop shell.
 
 ---
 
@@ -223,7 +265,19 @@ real fonts, real session streams, and the waiting-card interactions are unverifi
 5. **No Markdown.** Assistant text renders as plain pre-wrapped text, so `##` and `**` are visible.
 6. **Panel is not the Conversation.** No attachments, no queue dock, no stop button, no view tabs.
 7. **Styles are token-only.** Any literal colour breaks dark mode; `test/styles.spec.ts` enforces it.
-8. **`lib/`, `dist/`, `reports/`, `node_modules/`, `.dev-home/` are gitignored.** A fresh clone must
+8. **A displaced card must stay in the frozen order.** `reconcileOrder` moves the card it evicted
+   to the order's tail instead of dropping it. Dropping it makes it look "fresh" on the next
+   reconcile, and it would then evict another displayed card; with two cards and a budget of one the
+   grid then alternates between them on every render. Any change to that function must keep the
+   displaced id in the array. The page persists that order through `MonitorStore.setOrder`, so the
+   same applies to the stored array: never trim it to the displayed prefix, and never reconcile it
+   while the catalog snapshot is absent or `pending` — both would re-seed every card by recency.
+9. **A created session's card is only shown while it is blank.** `collectSessions` filters blank
+   rows except the ids in the local `spawned` set. The prune effect in `MonitorPage` removes an id
+   once its catalog row reports `blank !== true`; do not "fix" that to also remove missing ids — a
+   just-created row can lag the store write.
+10. **Cards carry `data-session-id`.** Use it to tell duplicate-looking cards apart in DevTools.
+11. **`lib/`, `dist/`, `reports/`, `node_modules/`, `.dev-home/` are gitignored.** A fresh clone must
    build; it cannot install a tarball that is not there.
 
 ---
@@ -315,3 +369,6 @@ Remember: a fixture screenshot proves layout, **not** app behaviour.
 | 0.7.4 | A finished unread run draws a green completion dot; clicking the card acknowledges it and returns the dot to grey idle |
 | 0.7.5 | Card footer reads tokens consumed, cache-hit share and context occupancy from the native `tokenUsage` and `contextPressure` projections |
 | 0.7.6 | Usage readout uses the permission/model select text colour (`--dsw-alias-label-secondary`) |
+| 0.8.0 | Toolbar New Session button with a Workspace drop-down; "Choose a folder…" adopts a directory as a Workspace and starts the session there |
+| 0.9.0 | Creating a session keeps the monitor open: its blank card joins the frozen order (oldest slot on a full grid) and a displaced card stays at the order tail, so the grid neither navigates nor churns |
+| 0.9.1 | The frozen order is stored with the preferences: a panel switch or app restart resumes the same cells, a `pending` catalog never re-seeds it, and a smaller budget only hides the order's tail instead of re-ranking |

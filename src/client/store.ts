@@ -10,13 +10,16 @@
  * @module dsh-session-monitor/client/store
  */
 
-import { DEFAULT_MAX_CARDS, MAX_CARDS_LIMIT, MAX_COLUMNS } from './model.ts'
+import { DEFAULT_MAX_CARDS, MAX_CARDS_LIMIT, MAX_COLUMNS, ORDER_LIMIT } from './model.ts'
 
 /** Storage key of the monitor's preferences. */
 export const STORAGE_KEY = 'dsh-session-monitor:prefs'
 
 /** Most acknowledgements kept, oldest dropped: a reminder log, not a history. */
 const ACKNOWLEDGED_LIMIT = 200
+
+/** Most created-but-still-blank sessions kept as cards. */
+const SPAWNED_LIMIT = 32
 
 /** One immutable view of the preferences. */
 export interface MonitorPrefs {
@@ -31,10 +34,35 @@ export interface MonitorPrefs {
    * opened elsewhere), so the mark returns for the next run.
    */
   readonly acknowledged: ReadonlySet<string>
+  /**
+   * Session ids this panel created and still shows while they are blank.
+   *
+   * A Session with no turn yet is normally not a card, but the one the user
+   * just created here is exactly the card they asked for. Once its first turn
+   * gives it a title, the id is forgotten and the card stays as an ordinary one.
+   */
+  readonly spawned: ReadonlySet<string>
+  /**
+   * The grid's frozen display order: session ids in the position they hold.
+   *
+   * A card's position is a promise the monitor keeps: once a session is placed
+   * it stays in that cell until it is the oldest card and a newer session takes
+   * its slot. Storing the order here — rather than in the mounted page — is what
+   * keeps that promise across a panel switch and an app restart, and it means
+   * activity never re-ranks the grid.
+   */
+  readonly order: readonly string[]
   /** Card budget for idle and running sessions. */
   readonly maxCards: number
   /** Cards per row; `0` lets the grid fill the column automatically. */
   readonly columns: number
+  /**
+   * The Workspace the toolbar's new-session control last started in.
+   *
+   * It is a remembered choice, not a fact: a Workspace that no longer exists is
+   * ignored when the default is resolved, and the next choice replaces it.
+   */
+  readonly newWorkspaceId: string | undefined
 }
 
 /** Where the preferences are persisted; injectable so tests need no browser. */
@@ -55,7 +83,15 @@ export interface MonitorPrefsSource {
  * @returns the parsed preferences, or the defaults.
  */
 export function parsePrefs(raw: string | null): MonitorPrefs {
-  const defaults: MonitorPrefs = { hidden: new Set(), acknowledged: new Set(), maxCards: DEFAULT_MAX_CARDS, columns: 0 }
+  const defaults: MonitorPrefs = {
+    hidden: new Set(),
+    acknowledged: new Set(),
+    spawned: new Set(),
+    order: [],
+    maxCards: DEFAULT_MAX_CARDS,
+    columns: 0,
+    newWorkspaceId: undefined,
+  }
   if (raw === null || raw.trim() === '') return defaults
   try {
     const parsed: unknown = JSON.parse(raw)
@@ -69,13 +105,34 @@ export function parsePrefs(raw: string | null): MonitorPrefs {
     if (Array.isArray(record.acknowledged)) {
       for (const id of record.acknowledged) if (typeof id === 'string' && id !== '') acknowledged.add(id)
     }
+    const spawned = new Set<string>()
+    if (Array.isArray(record.spawned)) {
+      for (const id of record.spawned) {
+        if (typeof id === 'string' && id !== '') spawned.add(id)
+        if (spawned.size >= SPAWNED_LIMIT) break
+      }
+    }
     const max = typeof record.maxCards === 'number' && Number.isFinite(record.maxCards) ? Math.trunc(record.maxCards) : DEFAULT_MAX_CARDS
     const columns = typeof record.columns === 'number' && Number.isFinite(record.columns) ? Math.trunc(record.columns) : 0
+    const order: string[] = []
+    if (Array.isArray(record.order)) {
+      for (const id of record.order) {
+        if (typeof id !== 'string' || id === '' || order.includes(id)) continue
+        order.push(id)
+        if (order.length >= ORDER_LIMIT) break
+      }
+    }
     return {
       hidden,
       acknowledged,
+      spawned,
+      order,
       maxCards: Math.max(1, Math.min(MAX_CARDS_LIMIT, max || DEFAULT_MAX_CARDS)),
       columns: Math.max(0, Math.min(MAX_COLUMNS, columns)),
+      newWorkspaceId:
+        typeof record.newWorkspaceId === 'string' && record.newWorkspaceId !== ''
+          ? record.newWorkspaceId
+          : undefined,
     }
   } catch {
     return defaults
@@ -94,6 +151,16 @@ function browserStorage(): PrefsStorage | undefined {
   } catch {
     return undefined
   }
+}
+
+/**
+ * Whether two orders already describe the same positions.
+ * @param left - the stored order.
+ * @param right - the reconciled order.
+ * @returns true when they are the same sequence of ids.
+ */
+function sameOrder(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((id, index) => id === right[index])
 }
 
 /**
@@ -201,6 +268,26 @@ export class MonitorStore implements MonitorPrefsSource {
   }
 
   /**
+   * Replace the grid's frozen display order.
+   *
+   * Called by the page after every reconcile; an identical order is a no-op, so
+   * a render that changed only card content never touches storage or notifies a
+   * listener.
+   *
+   * @param order - ids in the position they now hold.
+   */
+  setOrder(order: readonly string[]): void {
+    const next: string[] = []
+    for (const id of order) {
+      if (typeof id !== 'string' || id === '' || next.includes(id)) continue
+      next.push(id)
+      if (next.length >= ORDER_LIMIT) break
+    }
+    if (sameOrder(this.#snapshot.order, next)) return
+    this.#commit({ ...this.#snapshot, order: next })
+  }
+
+  /**
    * Change how many ordinary cards the grid shows.
    * @param maxCards - requested budget; clamped to the supported range.
    */
@@ -221,6 +308,45 @@ export class MonitorStore implements MonitorPrefsSource {
   }
 
   /**
+   * Remember the Workspace the new-session control starts in.
+   * @param workspaceId - chosen Workspace, or `undefined` to forget it.
+   */
+  setNewWorkspace(workspaceId: string | undefined): void {
+    const next = workspaceId === '' ? undefined : workspaceId
+    if (next === this.#snapshot.newWorkspaceId) return
+    this.#commit({ ...this.#snapshot, newWorkspaceId: next })
+  }
+
+  /**
+   * Keep the card of a Session this panel just created, while it stays blank.
+   * @param sessionId - the Session the Host created or reused.
+   */
+  markSpawned(sessionId: string): void {
+    if (sessionId === '' || this.#snapshot.spawned.has(sessionId)) return
+    const spawned = new Set(this.#snapshot.spawned)
+    spawned.add(sessionId)
+    // Bounded, oldest-first: a blank Session that never started a turn must not
+    // grow this browser's preferences forever.
+    while (spawned.size > SPAWNED_LIMIT) {
+      const oldest = spawned.values().next().value
+      if (oldest === undefined) break
+      spawned.delete(oldest)
+    }
+    this.#commit({ ...this.#snapshot, spawned })
+  }
+
+  /**
+   * Stop treating one Session as a blank card.
+   * @param sessionId - the Session whose first turn started, or which vanished.
+   */
+  forgetSpawned(sessionId: string): void {
+    if (!this.#snapshot.spawned.has(sessionId)) return
+    const spawned = new Set(this.#snapshot.spawned)
+    spawned.delete(sessionId)
+    this.#commit({ ...this.#snapshot, spawned })
+  }
+
+  /**
    * Publish one new snapshot and persist it.
    * @param next - the new preferences.
    */
@@ -232,8 +358,11 @@ export class MonitorStore implements MonitorPrefsSource {
         JSON.stringify({
           hidden: [...next.hidden],
           acknowledged: [...next.acknowledged],
+          spawned: [...next.spawned],
+          order: next.order,
           maxCards: next.maxCards,
           columns: next.columns,
+          newWorkspaceId: next.newWorkspaceId,
         }),
       )
     } catch {

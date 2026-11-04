@@ -21,6 +21,7 @@ import { act } from 'react-dom/test-utils'
 import { createRoot, type Root } from 'react-dom/client'
 import type { ReactElement } from 'react'
 import { MonitorPage } from '../src/client/MonitorPage.tsx'
+import { CHOOSE_FOLDER } from '../src/client/NewSessionControl.tsx'
 import { MonitorStore } from '../src/client/store.ts'
 import { en, type MonitorKey } from '../src/client/locales.ts'
 import type {
@@ -29,8 +30,10 @@ import type {
   SessionListSnapshotLike,
   SessionStatusLike,
   SessionsServiceLike,
+  SessionRowLike,
   UiSessionServiceLike,
   WorkspacesServiceLike,
+  WorkspacesSnapshotLike,
 } from '../src/client/types.ts'
 
 declare global {
@@ -164,6 +167,28 @@ async function typeInto(textarea: HTMLTextAreaElement, value: string): Promise<v
     setter?.call(textarea, value)
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
   })
+}
+
+/** Flush a chain that spans several awaits (folder pick → adopt → start). */
+async function settle(): Promise<void> {
+  for (let index = 0; index < 6; index += 1) await flush()
+}
+
+/** Choose one row of the toolbar's Workspace select. */
+async function chooseWorkspace(value: string): Promise<void> {
+  const select = host.querySelector<HTMLSelectElement>('.dsm-newWorkspace')
+  expect(select, 'the Workspace select should exist').not.toBeNull()
+  await act(async () => {
+    if (select === null) return
+    select.value = value
+    select.dispatchEvent(new Event('change', { bubbles: true }))
+  })
+  await flush()
+}
+
+/** The toolbar's new-session button, when it rendered. */
+function newSessionButton(): HTMLButtonElement | undefined {
+  return [...host.querySelectorAll<HTMLButtonElement>('.dsm-newSession button')][0]
 }
 
 describe('MonitorPage', () => {
@@ -619,19 +644,124 @@ describe('MonitorPage', () => {
     await flush()
     expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth'])
 
-    // …but shrinking the budget is the user asking for the newest cards.
+    // …and a smaller budget hides the tail: it never re-ranks, so the cards
+    // that stay on screen keep the cells they already had.
     await act(async () => {
       store.setMaxCards(3)
     })
     await flush()
-    expect(titles()).toEqual(['Third', 'First', 'Second'])
+    expect(titles()).toEqual(['First', 'Second', 'Third'])
 
-    // Growing it again reveals the rest without reordering what is shown.
+    // Growing it again reveals the same tail, in place.
     await act(async () => {
       store.setMaxCards(5)
     })
     await flush()
-    expect(titles()).toEqual(['Third', 'First', 'Second', 'Fourth', 'Fifth'])
+    expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth'])
+  })
+
+  it('keeps card positions across a panel remount, a reload and a recency change', async () => {
+    const rows = (third: number) => ({
+      ids: ['session-1', 'session-2', 'session-3', 'session-4'],
+      byId: {
+        'session-1': { id: 'session-1', title: 'First', running: false, blank: false, updatedAt: 5_000 },
+        'session-2': { id: 'session-2', title: 'Second', running: false, blank: false, updatedAt: 4_000 },
+        'session-3': { id: 'session-3', title: 'Third', running: false, blank: false, updatedAt: third },
+        'session-4': { id: 'session-4', title: 'Fourth', running: false, blank: false, updatedAt: 2_000 },
+      },
+      phase: 'ready',
+    })
+    const list = new Source<SessionListSnapshotLike>(rows(3_000))
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const storage = new FakeStorage()
+    const store = new MonitorStore(storage)
+    const page = (bound: MonitorStore): ReactElement => (
+      <MonitorPage
+        t={t}
+        store={bound}
+        sessions={sessions}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+      />
+    )
+    const titles = (): (string | null)[] =>
+      [...host.querySelectorAll('.dsm-cardTitle')].map((node) => node.textContent)
+
+    await renderPage(page(store))
+    expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth'])
+
+    // A prompt makes Third the most recent session. The grid must not follow it.
+    await act(async () => {
+      list.set(rows(9_000))
+    })
+    await flush()
+    expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth'])
+
+    // Leaving the panel and coming back is a fresh mount: the stored positions
+    // are the ones to resume, not a new precedence seed.
+    act(() => root.unmount())
+    root = createRoot(host)
+    await renderPage(page(store))
+    expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth'])
+
+    // An app restart reads the order back from storage, in the same cells.
+    act(() => root.unmount())
+    root = createRoot(host)
+    await renderPage(page(new MonitorStore(storage)))
+    expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth'])
+  })
+
+  it('does not re-seed the stored order while the catalog is absent', async () => {
+    const storage = new FakeStorage()
+    const store = new MonitorStore(storage)
+    store.setOrder(['session-2', 'session-1'])
+    // The shipped catalog starts empty and `pending`: that is "not known yet",
+    // not "every card is gone".
+    const list = new Source<SessionListSnapshotLike>({ ids: [], byId: {}, phase: 'pending' })
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+
+    await renderPage(
+      <MonitorPage t={t} store={store} sessions={sessions} uiSession={{ sessionStatus: new Source(new Map()) }} />,
+    )
+    // Nothing is known yet, so nothing may be forgotten: the stored order stands.
+    expect(store.getSnapshot().order).toEqual(['session-2', 'session-1'])
+    expect(host.querySelectorAll('.dsm-cardTitle')).toHaveLength(0)
+
+    // The first pull fills the catalog: the known cards resume their cells and
+    // the one session the monitor has never placed joins after them.
+    await act(async () => {
+      list.set({
+        ids: ['session-3', 'session-1', 'session-2'],
+        byId: {
+          'session-1': { id: 'session-1', title: 'First', running: false, blank: false, updatedAt: 1_000 },
+          'session-2': { id: 'session-2', title: 'Second', running: false, blank: false, updatedAt: 2_000 },
+          'session-3': { id: 'session-3', title: 'Third', running: false, blank: false, updatedAt: 9_000 },
+        },
+        phase: 'ready',
+      })
+    })
+    await flush()
+    const titles = [...host.querySelectorAll('.dsm-cardTitle')].map((node) => node.textContent)
+    expect(titles).toEqual(['Second', 'First', 'Third'])
   })
 
   it('follows a running-status change and a catalog update after mount', async () => {
@@ -1775,5 +1905,279 @@ describe('MonitorPage', () => {
     const body = host.querySelector('.dsm-assistant')
     expect(body?.textContent).toBe(answer)
     expect(body?.textContent?.endsWith('- I cannot find the code that built this panel.')).toBe(true)
+  })
+
+  it('starts a session in the Workspace chosen beside the new-session button', async () => {
+    const list = new Source<SessionListSnapshotLike>({
+      ids: ['session-1'],
+      byId: {
+        'session-1': {
+          id: 'session-1',
+          title: 'Alpha session',
+          running: false,
+          blank: false,
+          updatedAt: 5_000,
+          cwd: '/work/alpha',
+        },
+      },
+      phase: 'ready',
+    })
+    const workspaces = new Source<WorkspacesSnapshotLike>({
+      items: [
+        { workspaceId: 'ws-alpha', title: 'Alpha', path: '/work/alpha', sessionIds: ['session-1'] },
+        { workspaceId: 'ws-beta', title: 'Beta', path: '/work/beta', sessionIds: [] },
+      ],
+      phase: 'ready',
+    })
+    const start = vi.fn(async () => 'session-new')
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={sessions}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+        workspaces={{ list: workspaces }}
+        newSession={{ start }}
+      />,
+    )
+
+    // The Workspace holding the most recent session is the default.
+    const select = host.querySelector<HTMLSelectElement>('.dsm-newWorkspace')
+    expect(select?.value).toBe('ws-alpha')
+    expect([...(select?.querySelectorAll('option') ?? [])].map((option) => option.textContent)).toEqual([
+      'Alpha',
+      'Beta',
+    ])
+    // No picker in this composition: the folder row is absent, not dead.
+    expect(select?.querySelector(`option[value="${CHOOSE_FOLDER}"]`)).toBeNull()
+    expect(newSessionButton()?.textContent).toBe(en.newSession)
+
+    await chooseWorkspace('ws-beta')
+    expect(store.getSnapshot().newWorkspaceId).toBe('ws-beta')
+    expect(host.querySelector<HTMLSelectElement>('.dsm-newWorkspace')?.value).toBe('ws-beta')
+
+    await clickByText(en.newSession)
+    expect(start).toHaveBeenCalledWith('ws-beta')
+    // The control stays usable after a successful start (this fake does not navigate).
+    expect(newSessionButton()?.disabled).toBe(false)
+  })
+
+  it('adopts a picked folder as a Workspace and starts the session there', async () => {
+    const list = new Source<SessionListSnapshotLike>({
+      ids: ['session-1'],
+      byId: {
+        'session-1': { id: 'session-1', title: 'Alpha session', running: false, blank: false, updatedAt: 9_000 },
+      },
+      phase: 'ready',
+    })
+    const workspaces = new Source<WorkspacesSnapshotLike>({
+      items: [{ workspaceId: 'ws-alpha', title: 'Alpha', path: '/work/alpha', sessionIds: ['session-1'] }],
+      phase: 'ready',
+    })
+    const start = vi.fn(async () => 'ws-fresh-session')
+    const pickFolder = vi.fn(async () => '/work/fresh')
+    const createWorkspace = vi.fn(async (path: string) => ({
+      workspaceId: 'ws-fresh',
+      title: 'fresh',
+      path,
+      sessionIds: [],
+    }))
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={sessions}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+        workspaces={{ list: workspaces }}
+        newSession={{ start, pickFolder, createWorkspace }}
+      />,
+    )
+
+    expect(host.querySelector(`option[value="${CHOOSE_FOLDER}"]`)?.textContent).toBe(en.pickFolder)
+
+    await chooseWorkspace(CHOOSE_FOLDER)
+    await settle()
+
+    expect(pickFolder).toHaveBeenCalledTimes(1)
+    expect(createWorkspace).toHaveBeenCalledWith('/work/fresh')
+    // The adopted Workspace is remembered and becomes the choice, and the
+    // session starts in it without a second click.
+    expect(store.getSnapshot().newWorkspaceId).toBe('ws-fresh')
+    expect(start).toHaveBeenCalledWith('ws-fresh')
+  })
+
+  it('shows the created session in the oldest card slot on a full grid', async () => {
+    const rows: Record<string, SessionRowLike> = {
+      a: { id: 'a', title: 'Alpha', running: false, blank: false, updatedAt: 3_000 },
+      b: { id: 'b', title: 'Beta', running: false, blank: false, updatedAt: 2_000 },
+      c: { id: 'c', title: 'Gamma', running: false, blank: false, updatedAt: 1_000 },
+    }
+    const list = new Source<SessionListSnapshotLike>({ ids: ['a', 'b', 'c'], byId: rows, phase: 'ready' })
+    const workspaces = new Source<WorkspacesSnapshotLike>({
+      items: [{ workspaceId: 'ws-alpha', title: 'Alpha', path: '/work/alpha', sessionIds: [] }],
+      phase: 'ready',
+    })
+    // The Host answers with a new blank session, and the catalog publishes it.
+    const start = vi.fn(async (): Promise<string> => {
+      const created = { id: 'created', blank: true, updatedAt: 4_000 }
+      list.set({ ids: ['created', 'a', 'b', 'c'], byId: { created, ...rows }, phase: 'ready' })
+      return 'created'
+    })
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const openSession = vi.fn()
+    const store = new MonitorStore(new FakeStorage())
+    // Three cards on a budget of three: the grid is full.
+    store.setMaxCards(3)
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={sessions}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+        workspaces={{ list: workspaces }}
+        openSession={openSession}
+        newSession={{ start }}
+      />,
+    )
+
+    const titles = (): (string | null)[] =>
+      [...host.querySelectorAll('.dsm-cardTitle')].map((node) => node.textContent)
+    expect(titles()).toEqual(['Alpha', 'Beta', 'Gamma'])
+
+    await clickByText(en.newSession)
+    await settle()
+
+    // The blank session is the card the user asked for, under its localized
+    // title, in the oldest card's slot: `c` yields index 2 and nothing moves.
+    expect(titles()).toEqual(['Alpha', 'Beta', en.newSession])
+    expect(host.querySelectorAll('.dsm-card')).toHaveLength(3)
+    expect(store.getSnapshot().spawned.has('created')).toBe(true)
+    // The monitor stays the visible page: creating a session does not navigate.
+    expect(openSession).not.toHaveBeenCalled()
+    expect(host.querySelector('.dsm-page')).not.toBeNull()
+  })
+
+  it('leaves the choice unchanged when the folder chooser is cancelled', async () => {
+    const list = new Source<SessionListSnapshotLike>({ ids: [], byId: {}, phase: 'ready' })
+    const workspaces = new Source<WorkspacesSnapshotLike>({
+      items: [{ workspaceId: 'ws-alpha', title: 'Alpha', path: '/work/alpha', sessionIds: [] }],
+      phase: 'ready',
+    })
+    const start = vi.fn(async () => 'ws-new-session')
+    const createWorkspace = vi.fn(async (path: string) => ({ workspaceId: 'ws-new', path, sessionIds: [] }))
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={{ list }}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+        workspaces={{ list: workspaces }}
+        newSession={{ start, pickFolder: async () => null, createWorkspace }}
+      />,
+    )
+
+    await chooseWorkspace(CHOOSE_FOLDER)
+    await settle()
+
+    expect(createWorkspace).not.toHaveBeenCalled()
+    expect(start).not.toHaveBeenCalled()
+    expect(store.getSnapshot().newWorkspaceId).toBeUndefined()
+    // The select was handed back to the real choice, not left on the folder row.
+    expect(host.querySelector<HTMLSelectElement>('.dsm-newWorkspace')?.value).toBe('ws-alpha')
+  })
+
+  it('reports a refused start instead of blanking the control', async () => {
+    const list = new Source<SessionListSnapshotLike>({ ids: [], byId: {}, phase: 'ready' })
+    const workspaces = new Source<WorkspacesSnapshotLike>({
+      items: [{ workspaceId: 'ws-alpha', title: 'Alpha', path: '/work/alpha', sessionIds: [] }],
+      phase: 'ready',
+    })
+    const start = vi.fn(async () => {
+      throw new Error('session/conflict: a writer holds this session')
+    })
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={{ list }}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+        workspaces={{ list: workspaces }}
+        newSession={{ start }}
+      />,
+    )
+
+    await clickByText(en.newSession)
+    await settle()
+
+    const alert = host.querySelector('[role=alert]')
+    expect(alert?.textContent).toContain('session/conflict: a writer holds this session')
+    expect(newSessionButton()?.disabled).toBe(false)
+    // The page is still there: a failed start is a message, not an error state.
+    expect(host.querySelector('.dsm-page')).not.toBeNull()
+  })
+
+  it('renders no new-session control when the composition cannot start one', async () => {
+    const list = new Source<SessionListSnapshotLike>({ ids: [], byId: {}, phase: 'ready' })
+    const workspaces = new Source<WorkspacesSnapshotLike>({
+      items: [{ workspaceId: 'ws-alpha', title: 'Alpha', path: '/work/alpha', sessionIds: [] }],
+      phase: 'ready',
+    })
+    const store = new MonitorStore(new FakeStorage())
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={{ list }}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+        workspaces={{ list: workspaces }}
+      />,
+    )
+
+    expect(host.querySelector('.dsm-newSession')).toBeNull()
+    expect(host.querySelector('.dsm-newWorkspace')).toBeNull()
+    // The rest of the toolbar is untouched.
+    expect(host.textContent).toContain('0 shown')
   })
 })

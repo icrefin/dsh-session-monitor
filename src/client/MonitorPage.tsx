@@ -17,17 +17,20 @@ import {
   autoColumns,
   collectSessions,
   DEFAULT_MAX_CARDS,
+  defaultWorkspaceId,
   displayOrder,
   gridRows,
   MAX_CARDS_LIMIT,
   MAX_COLUMNS,
-  reconcileBudget,
+  orderOrSeed,
 } from './model.ts'
 import type { MonitorStore } from './store.ts'
 import type { MonitorPrefs } from './store.ts'
+import { NewSessionControl } from './NewSessionControl.tsx'
 import { SessionCard } from './SessionCard.tsx'
 import type {
   ModelDirectoryLike,
+  NewSessionActionsLike,
   ObservableSnapshotLike,
   RemoteServiceLike,
   SessionListSnapshotLike,
@@ -58,6 +61,12 @@ export interface MonitorPageProps {
   readonly modelDirectoryFor?: ((sessionId: string) => ModelDirectoryLike | undefined) | undefined
   /** Open one session in the conversation view, when the navigation service exists. */
   readonly openSession?: ((sessionId: string) => void) | undefined
+  /**
+   * Create a session in a chosen or newly adopted Workspace, when the
+   * composition provides the verbs. Without it the toolbar renders no
+   * new-session control.
+   */
+  readonly newSession?: NewSessionActionsLike | undefined
 }
 
 /** Card budgets the toolbar offers. */
@@ -143,6 +152,7 @@ export function MonitorPage({
   remote,
   modelDirectoryFor,
   openSession,
+  newSession,
 }: MonitorPageProps): ReactElement {
   const list = useServiceSnapshot<SessionListSnapshotLike>(sessions?.list)
   const statuses = useServiceSnapshot<ReadonlyMap<string, SessionStatusLike>>(uiSession?.sessionStatus)
@@ -186,33 +196,82 @@ export function MonitorPage({
   }, [sessions])
 
   /** Every session eligible for a card, before the display order is applied. */
+  const defaultWorkspaceTitle = t('defaultWorkspace')
+  const blankTitle = t('newSession')
   const candidates = useMemo(
-    () => collectSessions(list, statuses, prefs.hidden, workspaceSnapshot?.items),
-    [list, statuses, prefs.hidden, workspaceSnapshot],
+    () =>
+      collectSessions(list, statuses, prefs.hidden, {
+        workspaces: workspaceSnapshot?.items,
+        defaultWorkspaceTitle,
+        spawned: prefs.spawned,
+        blankTitle,
+      }),
+    [list, statuses, prefs.hidden, prefs.spawned, workspaceSnapshot, defaultWorkspaceTitle, blankTitle],
   )
 
   /**
    * The grid's order is frozen once cards are on screen: a prompt or a state
-   * change updates a card's content, never its position. Only a session that is
-   * not displayed yet enters — at the end while there is room, or into the slot
-   * of the least recently used card on a full grid — mirroring the user's intent
-   * that the cards they are watching stay put.
+   * change updates a card's content, never its position. A session that is not
+   * displayed yet enters — at the end while there is room, or into the slot of
+   * the least recently used card on a full grid — mirroring the user's intent
+   * that the cards they are watching stay put. A session created from this
+   * toolbar is an ordinary new arrival here: with room nothing moves, and on a
+   * full grid its card takes the oldest card's slot.
+   *
+   * The order itself is stored with the preferences rather than kept in a
+   * closure, so leaving the panel and coming back — or restarting the app —
+   * resumes the same positions instead of re-seeding them by recency. Nothing
+   * re-ranks the grid, not even a smaller card budget: that hides the tail of
+   * the frozen order and shows it again, in place, when the budget grows.
    */
-  const orderRef = useRef<readonly string[]>([])
-  const budgetRef = useRef<number>(prefs.maxCards)
+  const orderRef = useRef<readonly string[]>(prefs.order)
   const monitored = useMemo(() => {
     const byId = new Map(candidates.map((entry) => [entry.id, entry]))
+    // Before the catalog's first pull the snapshot is empty and `pending`, which
+    // says "nothing is known yet", not "every card disappeared". Reconciling it
+    // would erase the stored order and re-seed it (moving every card) on each
+    // mount, so the order is left alone until the catalog is ready.
     const previous = orderRef.current
-    const next = reconcileBudget(previous, candidates, budgetRef.current, prefs.maxCards)
+    const ready = list?.byId !== undefined && list.phase !== 'pending'
+    const next = ready ? orderOrSeed(previous, candidates, prefs.maxCards) : previous
     orderRef.current = next
-    budgetRef.current = prefs.maxCards
     const cards = []
     for (const id of displayOrder(next, candidates, prefs.maxCards)) {
       const entry = byId.get(id)
       if (entry !== undefined) cards.push(entry)
     }
     return cards
-  }, [candidates, prefs.maxCards])
+  }, [candidates, list, prefs.maxCards])
+
+  // Persist the reconciled order after the render that produced it. `setOrder`
+  // ignores an unchanged sequence, so this is not a render loop.
+  useEffect(() => {
+    store.setOrder(orderRef.current)
+  }, [candidates, list, prefs.maxCards, store])
+
+  /**
+   * Keep the card of a session created from this toolbar.
+   *
+   * A blank row is normally not a card; this one is exactly what the user just
+   * asked for, so its id is remembered until its first turn titles it.
+   *
+   * @param sessionId - the Session the Host created.
+   */
+  const handleStarted = useCallback(
+    (sessionId: string): void => {
+      store.markSpawned(sessionId)
+    },
+    [store],
+  )
+
+  // A created session stops being a special blank card as soon as its first turn
+  // gives it a title; the card itself stays where it is.
+  useEffect(() => {
+    for (const id of prefs.spawned) {
+      const row = list?.byId?.[id]
+      if (row !== undefined && row.blank !== true) store.forgetSpawned(id)
+    }
+  }, [list, prefs.spawned, store])
 
   // A reminder is over once the Session reports no unread completion — a new
   // run started, or the conversation view opened it. Forget the acknowledgement
@@ -226,6 +285,10 @@ export function MonitorPage({
   const waiting = monitored.filter((entry) => entry.state === 'waiting').length
   const running = monitored.filter((entry) => entry.running).length
   const hidden = prefs.hidden.size
+
+  // The remembered Workspace wins while it exists; otherwise the most recently
+  // used one, so the toolbar's choice matches what the sidebar would start in.
+  const newWorkspaceId = defaultWorkspaceId(workspaceSnapshot?.items, list, prefs.newWorkspaceId)
 
   // The grid is a fixed page: every card must be visible without scrolling the
   // panel, so the column count and the row count are derived from the box the
@@ -269,6 +332,17 @@ export function MonitorPage({
         </header>
 
         <div className="dsm-toolbar">
+          {newSession === undefined ? null : (
+            <NewSessionControl
+              t={t}
+              workspaces={workspaceSnapshot?.items ?? []}
+              selectedId={newWorkspaceId}
+              actions={newSession}
+              onSelect={(workspaceId) => store.setNewWorkspace(workspaceId)}
+              onStarted={handleStarted}
+            />
+          )}
+          {newSession === undefined ? null : <span className="dsm-divider" aria-hidden="true" />}
           <span className="dsm-stat">{t('shown', { count: monitored.length })}</span>
           {waiting === 0 ? null : (
             <span className="dsm-stat" data-tone="waiting">

@@ -95,6 +95,16 @@ export const MAX_CARDS_LIMIT = 16
 /** Hard ceiling on the explicit cards-per-row choice. */
 export const MAX_COLUMNS = 6
 
+/**
+ * Hard ceiling on the stored display order.
+ *
+ * The order holds every known session, not only the displayed cards: a card the
+ * budget hides must stay known or it would look like a fresh arrival and evict
+ * another card. This limit only defends `localStorage` against a corrupt
+ * payload; it is far above any realistic profile.
+ */
+export const ORDER_LIMIT = 512
+
 /** Card size the Auto layout aims for, in CSS pixels. */
 export const NOMINAL_CARD = { width: 300, height: 220 } as const
 
@@ -400,6 +410,70 @@ export function workspaceTitles(
 }
 
 /**
+ * The literal title the Host gives a Workspace it created on first use.
+ *
+ * The sidebar replaces it with the caller's localized default name instead of
+ * showing the sentinel, and this panel does the same.
+ */
+export const DEFAULT_WORKSPACE_TITLE = 'default-workspace'
+
+/**
+ * Resolve the title a Workspace row is displayed under.
+ *
+ * @param title - the registry title, possibly the automatic sentinel.
+ * @param fallback - localized name for the automatic title.
+ * @returns the display title, or `undefined` when the row carries none.
+ */
+export function workspaceLabel(title: string | undefined, fallback?: string): string | undefined {
+  const trimmed = typeof title === 'string' ? title.trim() : ''
+  if (trimmed === '') return undefined
+  if (trimmed !== DEFAULT_WORKSPACE_TITLE) return trimmed
+  return fallback ?? trimmed
+}
+
+/**
+ * The Workspace a new session should start in.
+ *
+ * The remembered choice wins while it still exists, so the control keeps the
+ * Workspace the user used last. Otherwise the Workspace holding the most
+ * recently active Session wins, which is what the native sidebar does; an
+ * occupied Workspace beats an empty one, and Host order breaks the last tie.
+ *
+ * @param items - Workspace rows in Host order.
+ * @param list - the Session catalog snapshot, read for recency.
+ * @param remembered - this browser's last choice, when it still exists.
+ * @returns the Workspace id, or `undefined` when no Workspace is registered.
+ */
+export function defaultWorkspaceId(
+  items: readonly WorkspaceViewLike[] | undefined,
+  list: SessionListSnapshotLike | undefined,
+  remembered: string | undefined,
+): string | undefined {
+  if (items === undefined || items.length === 0) return undefined
+  const known = new Map<string, WorkspaceViewLike>()
+  for (const item of items) {
+    const id = item.workspaceId
+    if (typeof id === 'string' && id !== '') known.set(id, item)
+  }
+  if (known.size === 0) return undefined
+  if (remembered !== undefined && known.has(remembered)) return remembered
+
+  const byId = list?.byId
+  let newest: { readonly id: string; readonly time: number } | undefined
+  let firstOccupied: string | undefined
+  for (const [id, item] of known) {
+    const members = Array.isArray(item.sessionIds) ? item.sessionIds : []
+    if (members.length > 0) firstOccupied ??= id
+    for (const sessionId of members) {
+      const updatedAt = byId?.[sessionId]?.updatedAt
+      if (typeof updatedAt !== 'number' || !Number.isFinite(updatedAt)) continue
+      if (newest === undefined || updatedAt > newest.time) newest = { id, time: updatedAt }
+    }
+  }
+  return newest?.id ?? firstOccupied ?? known.keys().next().value
+}
+
+/**
  * Order and filter the watched sessions.
  *
  * Ordering is deliberate: a session blocked on the user outranks one that is
@@ -412,6 +486,7 @@ export function workspaceTitles(
  * @param statuses - the unified status projection.
  * @param hidden - ids the user removed from the monitor.
  * @param max - card budget; pending sessions are never cut off by it.
+ * @param options - Workspace rows and the two local exceptions to filtering.
  * @returns the ordered card list.
  */
 export function selectMonitored(
@@ -419,9 +494,31 @@ export function selectMonitored(
   statuses: ReadonlyMap<string, SessionStatusLike> | undefined,
   hidden: ReadonlySet<string>,
   max: number = DEFAULT_MAX_CARDS,
-  workspaces?: readonly WorkspaceViewLike[],
+  options: CollectOptions = {},
 ): MonitoredSession[] {
-  return initialCards(collectSessions(list, statuses, hidden, workspaces), max)
+  return initialCards(collectSessions(list, statuses, hidden, options), max)
+}
+
+/**
+ * How the page's view of the catalog differs from the raw registry.
+ *
+ * Everything here is a local presentation choice, not a fact about a Session.
+ */
+export interface CollectOptions {
+  /** Workspace registry rows, read for the titles a card shows. */
+  readonly workspaces?: readonly WorkspaceViewLike[]
+  /** Localized name for the Host's automatic Workspace title. */
+  readonly defaultWorkspaceTitle?: string
+  /**
+   * Sessions this panel created and still displays while they are blank.
+   *
+   * A blank Session has no turn yet, so the grid normally ignores it. One that
+   * was created here is exactly the card the user just asked for, and it keeps
+   * showing until its first turn gives it a title.
+   */
+  readonly spawned?: ReadonlySet<string>
+  /** Localized title for a spawned blank Session's card. */
+  readonly blankTitle?: string
 }
 
 /**
@@ -435,35 +532,38 @@ export function selectMonitored(
  * @param list - the client Session catalog snapshot.
  * @param statuses - the unified status projection.
  * @param hidden - ids the user removed from the monitor.
- * @param workspaces - the Workspace registry rows.
+ * @param options - Workspace rows, the localized automatic title, and the
+ *   spawned blanks this page keeps as cards.
  * @returns the eligible sessions, unordered.
  */
 export function collectSessions(
   list: SessionListSnapshotLike | undefined,
   statuses: ReadonlyMap<string, SessionStatusLike> | undefined,
   hidden: ReadonlySet<string>,
-  workspaces?: readonly WorkspaceViewLike[],
+  options: CollectOptions = {},
 ): MonitoredSession[] {
   const byId = list?.byId
   if (byId === undefined) return []
   const ids = list?.ids ?? Object.keys(byId)
-  const workspaceBySession = workspaceTitles(workspaces)
+  const workspaceBySession = workspaceTitles(options.workspaces)
 
   const candidates: MonitoredSession[] = []
   for (const id of ids) {
     if (hidden.has(id)) continue
     const row = byId[id]
     if (row === undefined) continue
-    if (row.blank === true) continue
+    const blank = row.blank === true
+    if (blank && options.spawned?.has(id) !== true) continue
     if (row.origin === 'subagent' || row.parentId !== undefined) continue
     const status = statuses?.get(id)
     const pending = status?.pendingInteraction
     const running = row.running === true || status?.running === true
     candidates.push({
       id,
-      title: sessionTitle(row),
+      title: blank ? (options.blankTitle ?? sessionTitle(row)) : sessionTitle(row),
       cwd: row.cwd,
-      workspace: workspaceBySession.get(id) ?? shortPath(row.cwd),
+      workspace:
+        workspaceLabel(workspaceBySession.get(id), options.defaultWorkspaceTitle) ?? shortPath(row.cwd),
       running,
       pending,
       updatedAt: row.updatedAt ?? 0,
@@ -568,7 +668,16 @@ export function seedOrder(candidates: readonly MonitoredSession[]): string[] {
  *
  * The returned order may hold more cards than the budget shows (a budget that
  * shrank keeps the extra cards in their slots); {@link displayOrder} decides
- * which prefix is actually on screen.
+ * which prefix is actually on screen. A budget change therefore **never**
+ * reorders or re-ranks: lowering the card count hides the tail of the frozen
+ * order and raising it reveals that same tail again, in place.
+ *
+ * A displaced card keeps its place in the order, at the tail: it becomes the
+ * last candidate the budget hides. Dropping it instead would make it "fresh" on
+ * the next reconcile, and it would then replace the next oldest card — the grid
+ * would churn between two cards for as long as both exist. The page stores this
+ * order, so a remount or an app restart resumes the same positions instead of
+ * re-seeding them by recency.
  *
  * @param previous - ids in their displayed order.
  * @param candidates - every currently eligible session.
@@ -591,19 +700,8 @@ export function reconcileOrder(
   const shownOrdinary = (): string[] =>
     shown().filter((id) => byId.get(id)?.state !== 'waiting')
 
-  const fresh = candidates.filter((entry) => !order.includes(entry.id)).sort(byPrecedence)
-  for (const entry of fresh) {
-    if (entry.state === 'waiting') {
-      // A blocked session is never cut off; appended so no displayed card moves.
-      order.push(entry.id)
-      continue
-    }
-    if (shownOrdinary().length < budget) {
-      order.push(entry.id)
-      continue
-    }
-    // Full: the least recently used displayed ordinary card yields its slot,
-    // and the new card takes that exact position.
+  /** The least recently used displayed ordinary card, if any is displayed. */
+  const oldestOrdinary = (): string | undefined => {
     let oldestId: string | undefined
     let oldestAt = Number.POSITIVE_INFINITY
     for (const id of shownOrdinary()) {
@@ -614,42 +712,61 @@ export function reconcileOrder(
         oldestId = id
       }
     }
+    return oldestId
+  }
+
+  const fresh = candidates.filter((entry) => !order.includes(entry.id)).sort(byPrecedence)
+  for (const entry of fresh) {
+    if (entry.state === 'waiting') {
+      // A blocked session is never cut off; appended so no displayed card moves.
+      order.push(entry.id)
+      continue
+    }
+    if (shownOrdinary().length < budget) {
+      // Room: the new card joins after the last one and nothing else moves.
+      order.push(entry.id)
+      continue
+    }
+    // Full: the least recently used displayed ordinary card yields its slot,
+    // and the new card takes that exact position. The displaced card stays
+    // known at the tail, hidden by the budget, so it cannot come back and push
+    // another card out on the next reconcile.
+    const oldestId = oldestOrdinary()
     if (oldestId === undefined) {
       // Every displayed card is waiting: keep them and show the new one too.
       order.push(entry.id)
       continue
     }
     const index = order.indexOf(oldestId)
-    if (index === -1) order.push(entry.id)
-    else order[index] = entry.id
+    if (index === -1) {
+      order.push(entry.id)
+    } else {
+      order.splice(index, 1, entry.id)
+      order.push(oldestId)
+    }
   }
 
   return order
 }
 
 /**
- * Reconcile the order when the card budget itself changes.
+ * The first order of a grid that has none yet.
  *
- * Shrinking the budget is a request to keep the most recent sessions: the grid
- * re-ranks (waiting, then running, then recency) before the smaller budget is
- * applied, so the cards that remain are the ones that were used most recently —
- * activity did not reorder anything, the user did. Growing the budget is not a
- * reorder: the frozen order stays and simply shows more of it.
+ * Seeding is the only place recency decides a position. A monitor whose order was
+ * never stored (a first mount, a fresh browser) starts from the same precedence
+ * the shipped Session rows use; from then on the order is frozen and stored.
  *
- * @param previous - ids in their displayed order.
+ * @param previous - the stored order; used as-is when it is not empty.
  * @param candidates - every currently eligible session.
- * @param previousMax - the budget the displayed order was built with.
- * @param max - the budget now selected.
+ * @param max - card budget for the ordinary cards.
  * @returns the next frozen order.
  */
-export function reconcileBudget(
+export function orderOrSeed(
   previous: readonly string[],
   candidates: readonly MonitoredSession[],
-  previousMax: number,
   max: number = DEFAULT_MAX_CARDS,
 ): string[] {
-  if (previous.length === 0 || max < previousMax) return seedOrder(candidates)
-  return reconcileOrder(previous, candidates, max)
+  return previous.length === 0 ? seedOrder(candidates) : reconcileOrder(previous, candidates, max)
 }
 
 /**
