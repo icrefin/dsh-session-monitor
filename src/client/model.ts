@@ -685,11 +685,11 @@ export function seedOrder(candidates: readonly MonitoredSession[]): string[] {
  *   displayed card, so every other card keeps its position. A waiting card is
  *   never displaced.
  *
- * The returned order may hold more cards than the budget shows (a budget that
- * shrank keeps the extra cards in their slots); {@link displayOrder} decides
- * which prefix is actually on screen. A budget change therefore **never**
- * reorders or re-ranks: lowering the card count hides the tail of the frozen
- * order and raising it reveals that same tail again, in place.
+ * The returned order may hold more cards than the budget shows; {@link
+ * displayOrder} decides which prefix is actually on screen. This reconcile never
+ * re-ranks: activity and a larger budget leave every position alone. A smaller
+ * budget is the one explicit exception — {@link orderForBudget} re-seeds the
+ * grid first, so the cards that stay are the newest ones.
  *
  * A displaced card keeps its place in the order, at the tail: it becomes the
  * last candidate the budget hides. Dropping it instead would make it "fresh" on
@@ -789,11 +789,37 @@ export function orderOrSeed(
 }
 
 /**
+ * The order to use after a card-budget change.
+ *
+ * Lowering the budget is a request to see the newest sessions: the grid is
+ * re-seeded from the current candidates (waiting, then running, then recency),
+ * so the cards that stay on screen are the newest ones and they are
+ * re-arranged to say so. Raising the budget, or leaving it alone, keeps the
+ * frozen order — the cards already on screen do not move, and the extra room
+ * reveals the order's next cards in place.
+ *
+ * @param previous - the stored order.
+ * @param candidates - every currently eligible session.
+ * @param previousMax - the budget the grid used before this change.
+ * @param max - the budget now.
+ * @returns the re-seeded order on a shrink, otherwise {@link orderOrSeed}.
+ */
+export function orderForBudget(
+  previous: readonly string[],
+  candidates: readonly MonitoredSession[],
+  previousMax: number,
+  max: number = DEFAULT_MAX_CARDS,
+): string[] {
+  if (max < previousMax) return seedOrder(candidates)
+  return orderOrSeed(previous, candidates, max)
+}
+
+/**
  * The cards actually on screen, in their frozen order.
  *
  * Waiting cards are always shown; ordinary cards are taken up to the budget, so
- * a budget that shrank hides the tail without forgetting its positions, and
- * raising it again reveals them in place.
+ * a budget that shrank shows the newest cards (the order was re-seeded) and
+ * raising it again reveals the rest of that order.
  *
  * @param ordered - the frozen order of ids.
  * @param candidates - every currently eligible session.

@@ -86,10 +86,11 @@ steps. Read it before changing behaviour.
   later joins at the end while there is room. A waiting card is never displaced. A
   session created by this toolbar follows the same rule, so starting one never
   reshuffles the page.
-- **No control reorders the grid.** A smaller card budget hides the tail of the
-  frozen order and raising it reveals that same tail again, in place; nothing is
-  re-ranked, so a card never changes cells because of activity or a settings
-  change.
+- **Activity never reorders the grid.** A prompt, a new turn or a state change
+  updates a card's content, never its position. The one deliberate exception is
+  a smaller card budget: lowering it re-seeds the grid, so the cards that stay
+  on screen are the **newest** sessions, arranged newest-first. Raising the
+  budget keeps that order and reveals the rest in place.
 - **Card budget.** The toolbar's **Cards** stepper moves the budget one card at
   a time, from **2** up to **24** (default 9), for idle and running sessions. The
   number in the middle is editable, and a value typed outside the range is
@@ -212,14 +213,16 @@ answer was accepted.
 
 ## Design decisions worth stating
 
-- **The order is frozen after the first paint.** Same precedence the shipped
-  Session rows use (pending → ongoing → finished → idle) only seeds the grid; once
-  a card is displayed, activity must not move it — and the order is stored, so a
-  remount or an app restart does not re-seed it either. That is what keeps a card
-  you are watching where you left it when you send it a prompt, and it makes a new
-  session take the least recently used card's slot instead of pushing everything
-  down. There is no exception: a **smaller card budget** only hides the order's
-  tail, and raising it shows the same cards in the same cells.
+- **The order is frozen after the first paint — except when the card budget
+  drops.** The same precedence the shipped Session rows use (pending → ongoing →
+  finished → idle) only seeds the grid; once a card is displayed, activity must
+  not move it — and the order is stored, so a remount or an app restart does not
+  re-seed it either. That is what keeps a card you are watching where you left it
+  when you send it a prompt, and it makes a new session take the least recently
+  used card's slot instead of pushing everything down. Lowering the **card
+  budget** is the deliberate exception: it re-seeds the grid, so the cards that
+  stay on screen are the newest sessions, arranged newest-first. Raising the
+  budget keeps that order and reveals the rest in place.
 - **The Workspace title is the card's second line, in normal text colour.** It comes from the Workspace registry,
   not from the `cwd` string, so a renamed Workspace shows its name; the raw path stays a tooltip. State and time
   follow it in the muted caption colour, and the status dot repeats the state at a glance.
@@ -260,15 +263,15 @@ answer was accepted.
 ## Verified
 
 - `pnpm check` — typecheck of both halves and the tests, the built bundle, then
-  the test run: **132 tests**, including a jsdom mount of the real page against
+  the test run: **133 tests**, including a jsdom mount of the real page against
   fake projections (ordering, live window, question answer, prompt send, removal,
   open failure, a long answer rendered whole, the new-session control's default
   Workspace, its start call, folder adoption, a cancelled chooser and a refused
   start), a created blank session taking the oldest card's slot on the page
   without navigating, a card keeping its cell across a panel remount and a reload,
-  a smaller card budget hiding the order's tail instead of re-ranking it, the
-  toolbar's card-budget stepper moving one card at a time and stopping at 2 and
-  24, a `pending` catalog leaving the stored order alone, a stylesheet guard
+  a smaller card budget re-seeding the grid to the newest sessions, the toolbar's
+  card-budget stepper moving one card at a time and stopping at 2 and 24, a
+  `pending` catalog leaving the stored order alone, a stylesheet guard
   (every rendered class has a rule; no literal colours), and an execution of the
   **built** bundle behind a fake module loader (bundle id, exports, real `apply`
   wiring, no second React).

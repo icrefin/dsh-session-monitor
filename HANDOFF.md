@@ -1,7 +1,7 @@
 # Handoff — dsh-session-monitor
 
-**Version:** 0.10.0 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
-**Written:** 2026-11-02 · **Updated:** 2026-11-07 (0.10.0, card-budget stepper)
+**Version:** 0.11.0 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
+**Written:** 2026-11-02 · **Updated:** 2026-11-07 (0.11.0: a smaller card budget re-seeds to the newest cards)
 **Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
 
 This document is for the next person (or agent) picking this work up on **another machine**.
@@ -11,9 +11,9 @@ It records what exists, what was verified, what was not, and what to do next.
 
 ## 1. One-paragraph status
 
-The plugin is feature-complete for its stated purpose and passes `pnpm check` (132 tests, both
+The plugin is feature-complete for its stated purpose and passes `pnpm check` (133 tests, both
 halves typechecked, loader bundle built). It is installed into the **desktop profile** on the
-machine where it was written, currently **0.10.0**; a bundle added to a running profile is inert
+machine where it was written, currently **0.11.0**; a bundle added to a running profile is inert
 until the app restarts, so the panel shows the new build only after a relaunch. The panel has **never been seen in the running GUI**: browser control was unavailable to
 the agent that built it. Layout was checked in a local Vite **component fixture** only. Treat
 in-app visual verification as the first open task.
@@ -42,8 +42,9 @@ in-app visual verification as the first open task.
   changes nothing.
 - Seed only: waiting > running > recency decides the first placement. From then on the order is
   frozen **and stored** in `localStorage` (`prefs.order`), so a panel switch, a reload or a restart
-  resumes the same cells; activity never moves a card, and no control re-ranks the grid (a smaller
-  budget only hides the order's tail). A waiting session is exempt from the card budget.
+  resumes the same cells; activity never moves a card. Lowering the **card budget** is the one
+  deliberate re-seed: the cards that stay are the newest sessions, newest-first. Raising it keeps
+  that order and reveals the rest. A waiting session is exempt from the card budget.
 
 Non-goals: it does not replace the Conversation, does not show the left/right panes, and does not
 render Markdown. It only creates *blank* sessions in place — it does not navigate, fork, archive,
@@ -190,14 +191,14 @@ set as soon as the catalog reports the row non-blank.
 ```sh
 cd dsh-session-monitor
 pnpm install
-pnpm check            # typecheck host + client + test, build lib/client.js, run 132 tests
-scripts/install.sh    # packs dist/dsh-session-monitor-0.10.0.tgz (builds first)
+pnpm check            # typecheck host + client + test, build lib/client.js, run 133 tests
+scripts/install.sh    # packs dist/dsh-session-monitor-0.11.0.tgz (builds first)
 ```
 
 Install into a CLI-managed profile:
 
 ```sh
-dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.10.0.tgz
+dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.11.0.tgz
 # then restart the server for the row to compose
 ```
 
@@ -206,7 +207,7 @@ Install into the **Electron desktop profile** (the CLI refuses it):
 ```sh
 cd ~/.dsh/profiles/desktop
 # back up package.json / pnpm-lock.yaml / cordis.patch.yml first
-pnpm add file:<abs-path>/dist/dsh-session-monitor-0.10.0.tgz
+pnpm add file:<abs-path>/dist/dsh-session-monitor-0.11.0.tgz
 # add "dsh-session-monitor" to "dsh.profile.bundles" in package.json
 # restart the app (a bundle added to a running profile is inert until then)
 ```
@@ -223,7 +224,7 @@ composition and bundle serving without touching a live profile.
 
 Proven:
 
-- `pnpm check`: 132 tests — model (selection, budget floor/ceiling, transcript, live chunks, whole long messages, grid fit, timestamps,
+- `pnpm check`: 133 tests — model (selection, budget floor/ceiling, the shrink re-seed, transcript, live chunks, whole long messages, grid fit, timestamps,
   Workspace label/default rules, stable replacement with the displaced card kept at the order tail),
   store (persistence incl. the remembered new-session Workspace and the spawned-blank set,
   clamping, notification), manifest (three ids, activation order, version chip),
@@ -231,8 +232,9 @@ Proven:
   jsdom page mount (ordering, live appends, question answer, single-select custom rule, prompt send,
   removal, open failure, silent-store reconcile, both new recovery triggers, the new-session
   control's default Workspace, its start call, folder adoption, a cancelled chooser, a refused
-  start, a created blank card taking the oldest slot on a full grid, and the card-budget stepper
-  moving one card per click and clamping at 2 and 24), and the **built** bundle
+  start, a created blank card taking the oldest slot on a full grid, the card-budget stepper
+  moving one card per click and clamping at 2 and 24, and a smaller budget re-seeding the grid
+  to the newest sessions), and the **built** bundle
   behind a fake loader (loader id, exports, real `apply`, no second React).
 - An isolated dsh profile composed the row and served
   `/plugins/??dsh-session-monitor/client.js&rev=…` with HTTP 200.
@@ -269,7 +271,7 @@ check ran the web app in Chrome, which is the same client bundle but not the des
 7. **Styles are token-only.** Any literal colour breaks dark mode; `test/styles.spec.ts` enforces it.
 8. **A displaced card must stay in the frozen order.** `reconcileOrder` moves the card it evicted
    to the order's tail instead of dropping it. Dropping it makes it look "fresh" on the next
-   reconcile, and it would then evict another displayed card; with two cards and a budget of one the
+   reconcile, and it would then evict another displayed card; with a small budget the
    grid then alternates between them on every render. Any change to that function must keep the
    displaced id in the array. The page persists that order through `MonitorStore.setOrder`, so the
    same applies to the stored array: never trim it to the displayed prefix, and never reconcile it
@@ -375,3 +377,4 @@ Remember: a fixture screenshot proves layout, **not** app behaviour.
 | 0.9.0 | Creating a session keeps the monitor open: its blank card joins the frozen order (oldest slot on a full grid) and a displaced card stays at the order tail, so the grid neither navigates nor churns |
 | 0.9.1 | The frozen order is stored with the preferences: a panel switch or app restart resumes the same cells, a `pending` catalog never re-seeds it, and a smaller budget only hides the order's tail instead of re-ranking |
 | 0.10.0 | The toolbar's card-budget select becomes a stepper: one card per increment, an editable number between 2 and 24, and the stored/clamped range widened from 1–16 to 2–24 |
+| 0.11.0 | Lowering the card budget re-seeds the grid to the newest sessions, newest-first; raising it keeps that order. This intentionally reverses the 0.9.1 rule that a smaller budget only hides the order's tail |

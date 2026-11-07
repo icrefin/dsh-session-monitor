@@ -31,6 +31,7 @@ import {
   permissionLabelKey,
   monitorState,
   newestEventTime,
+  orderForBudget,
   orderOrSeed,
   reconcileOrder,
   relativeLabel,
@@ -543,6 +544,16 @@ describe('frozen grid order', () => {
     // A new prompt would order c, b, a by recency; the displayed order must win.
     const candidates = [card('a', 10), card('b', 20), card('c', 30)]
     expect(reconcileOrder(['a', 'b', 'c'], candidates, 3)).toEqual(['a', 'b', 'c'])
+  })
+
+  it('re-seeds to the newest sessions when the budget shrinks, and keeps the order when it grows', () => {
+    const candidates = [card('a', 10), card('b', 30), card('c', 20)]
+    // The frozen order says a, b, c; a shrink must show the newest ones first.
+    expect(orderForBudget(['a', 'b', 'c'], candidates, 3, 2)).toEqual(['b', 'c', 'a'])
+    // Growing the budget keeps whatever is stored: nothing moves to make room.
+    expect(orderForBudget(['b', 'c', 'a'], candidates, 2, 3)).toEqual(['b', 'c', 'a'])
+    // An unchanged budget is not a shrink.
+    expect(orderForBudget(['a', 'b', 'c'], candidates, 3, 3)).toEqual(['a', 'b', 'c'])
   })
 
   it('appends a session that appears while there is room', () => {

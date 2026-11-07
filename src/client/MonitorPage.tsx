@@ -20,7 +20,7 @@ import {
   displayOrder,
   gridRows,
   MAX_COLUMNS,
-  orderOrSeed,
+  orderForBudget,
 } from './model.ts'
 import type { MonitorStore } from './store.ts'
 import type { MonitorPrefs } from './store.ts'
@@ -217,11 +217,14 @@ export function MonitorPage({
    *
    * The order itself is stored with the preferences rather than kept in a
    * closure, so leaving the panel and coming back — or restarting the app —
-   * resumes the same positions instead of re-seeding them by recency. Nothing
-   * re-ranks the grid, not even a smaller card budget: that hides the tail of
-   * the frozen order and shows it again, in place, when the budget grows.
+   * resumes the same positions instead of re-seeding them by recency. Activity
+   * never re-ranks the grid. Lowering the card budget is the one explicit
+   * exception: the grid is re-seeded so the cards that stay are the newest ones.
    */
   const orderRef = useRef<readonly string[]>(prefs.order)
+  // The budget the grid last laid out. A lower one re-seeds the order; a higher
+  // one only reveals more of it.
+  const budgetRef = useRef<number>(prefs.maxCards)
   const monitored = useMemo(() => {
     const byId = new Map(candidates.map((entry) => [entry.id, entry]))
     // Before the catalog's first pull the snapshot is empty and `pending`, which
@@ -230,7 +233,12 @@ export function MonitorPage({
     // mount, so the order is left alone until the catalog is ready.
     const previous = orderRef.current
     const ready = list?.byId !== undefined && list.phase !== 'pending'
-    const next = ready ? orderOrSeed(previous, candidates, prefs.maxCards) : previous
+    const next = ready
+      ? orderForBudget(previous, candidates, budgetRef.current, prefs.maxCards)
+      : previous
+    // Only a ready catalog commits the new budget: a shrink that arrives while
+    // the catalog is pending must still re-seed once it becomes ready.
+    if (ready) budgetRef.current = prefs.maxCards
     orderRef.current = next
     const cards = []
     for (const id of displayOrder(next, candidates, prefs.maxCards)) {

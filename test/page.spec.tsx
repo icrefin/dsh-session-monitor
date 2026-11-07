@@ -619,7 +619,7 @@ describe('MonitorPage', () => {
     expect(titles()).toEqual(['First', 'Second', 'Third'])
   })
 
-  it('re-ranks to the newest cards when the budget shrinks and keeps the order when it grows', async () => {
+  it('re-seeds to the newest cards when the budget shrinks and keeps the order when it grows', async () => {
     const rows = (third: number) => ({
       ids: ['session-1', 'session-2', 'session-3', 'session-4', 'session-5'],
       byId: {
@@ -664,20 +664,20 @@ describe('MonitorPage', () => {
     await flush()
     expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth'])
 
-    // …and a smaller budget hides the tail: it never re-ranks, so the cards
-    // that stay on screen keep the cells they already had.
+    // A smaller budget asks for the newest cards: the grid re-seeds and Third
+    // (now the most recent) moves to the first cell, even though it was third.
     await act(async () => {
-      store.setMaxCards(3)
+      store.setMaxCards(2)
     })
     await flush()
-    expect(titles()).toEqual(['First', 'Second', 'Third'])
+    expect(titles()).toEqual(['Third', 'First'])
 
-    // Growing it again reveals the same tail, in place.
+    // Growing it again keeps that newest-first order; the room reveals the rest.
     await act(async () => {
-      store.setMaxCards(5)
+      store.setMaxCards(4)
     })
     await flush()
-    expect(titles()).toEqual(['First', 'Second', 'Third', 'Fourth', 'Fifth'])
+    expect(titles()).toEqual(['Third', 'First', 'Second', 'Fourth'])
   })
 
   it('keeps card positions across a panel remount, a reload and a recency change', async () => {
