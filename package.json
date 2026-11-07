@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-monitor",
-  "version": "0.9.1",
+  "version": "0.10.0",
   "description": "Multi-grid live monitor for every active and recently used session: transcript, pending questions and prompts, all in one panel",
   "repository": {
     "type": "git",

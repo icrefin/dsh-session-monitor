@@ -75,8 +75,10 @@ DeepSeek Harness 一次只显示一个会话。几个会话并行工作时，侧
   规则，所以开始一个会话永远不会打乱页面。
 - **没有任何控件会重排网格。** 调小卡片预算只是把冻结顺序的尾部藏起来，调大又把同一段尾部
   原地显出来；什么都不重新排序，所以卡片绝不会因为活动或一次设置改动而换格子。
-- **卡片预算。** 工具栏为闲置和运行中的会话提供 3–16 张卡片（默认 9 张）。**正在等待
-  用户的会话永远不会被预算截掉**——那正是这个面板存在的理由。
+- **卡片预算。** 工具栏的 **卡片数** 步进器一次把预算加减一张，范围从 **2** 到 **24**
+  （默认 9 张），作用于闲置和运行中的会话。中间的数值可以直接编辑，输入超出范围的值会在
+  离开输入框时归一到范围内。**正在等待用户的会话永远不会被预算截掉**——那正是这个面板存在
+  的理由。
 - **每行卡片数。** 工具栏的 **Per row** 控件可以指定确切数量（2–6），也可以让网格留在
   **Auto**，用 260px 的卡片填满这一列。这个选择会和被移除的 id 一起记住。
 - **移除。** 被移除的 id 存在本浏览器的 `localStorage`
@@ -206,13 +208,14 @@ Auto review 保留一次就地确认，因为它改变的是每一个请求的�
 
 ## 验证结果
 
-- `pnpm check`——两半与测试的类型检查、构建出的 bundle，然后跑测试：**130 个测试**，
+- `pnpm check`——两半与测试的类型检查、构建出的 bundle，然后跑测试：**132 个测试**，
   包括用 jsdom 把真实页面挂到假投影上（排序、实时窗口、问答作答、发送提示词、移除、
   打开失败、长回答完整渲染、新建会话控件的默认工作区、它的启动调用、文件夹接纳、被取消的
   选择器和被拒绝的启动）、新建的空白会话在页面上接替最旧卡片的位置而不跳转、卡片在面板
-  重挂载与重新加载后保持原格、更小的预算藏起顺序尾部而不重排、`pending` 目录不动已存的
-  顺序、一道样式表守卫（每个渲染出的 class 都有规则；没有字面颜色），以及在假模块加载器
-  后面执行**构建产物**（bundle id、导出、真实的 `apply` 接线、没有第二份 React）。
+  重挂载与重新加载后保持原格、更小的预算藏起顺序尾部而不重排、工具栏的卡片预算步进器
+  每次只加减一张并在 2 和 24 处停住、`pending` 目录不动已存的顺序、一道样式表守卫
+  （每个渲染出的 class 都有规则；没有字面颜色），以及在假模块加载器后面执行**构建产物**
+  （bundle id、导出、真实的 `apply` 接线、没有第二份 React）。
 - `scripts/dev-profile.sh`——一个隔离的 profile 能启动这一行，并伺服
   `/plugins/dsh-session-monitor/client.js`。
 - 未验证：面板的实际像素。本次会话没有浏览器控制，所以视觉检查（浅色/深色、窄宽度下的卡片
@@ -238,6 +241,7 @@ scripts/install.sh            # 构建、打包，并打印 tarball 路径
 src/index.ts                     host half: identity only, registers nothing
 src/client/index.tsx             sidebar row + main page registration
 src/client/MonitorPage.tsx       grid, toolbar, card selection
+src/client/CardBudgetControl.tsx 卡片预算步进器（− / 数字 / +）
 src/client/NewSessionControl.tsx new-session button + Workspace drop-down
 src/client/SessionCard.tsx       one card: header, transcript, pending, composer
 src/client/InteractionCard.tsx   question/approval answer block

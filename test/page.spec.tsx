@@ -22,6 +22,7 @@ import { createRoot, type Root } from 'react-dom/client'
 import type { ReactElement } from 'react'
 import { MonitorPage } from '../src/client/MonitorPage.tsx'
 import { CHOOSE_FOLDER } from '../src/client/NewSessionControl.tsx'
+import { MAX_CARDS_LIMIT, MIN_CARDS } from '../src/client/model.ts'
 import { MonitorStore } from '../src/client/store.ts'
 import { en, type MonitorKey } from '../src/client/locales.ts'
 import type {
@@ -167,6 +168,25 @@ async function typeInto(textarea: HTMLTextAreaElement, value: string): Promise<v
     setter?.call(textarea, value)
     textarea.dispatchEvent(new Event('input', { bubbles: true }))
   })
+}
+
+/** Set a text field's value the way React's onChange expects. */
+async function typeIntoField(input: HTMLInputElement, value: string): Promise<void> {
+  const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
+  await act(async () => {
+    setter?.call(input, value)
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+  })
+  await flush()
+}
+
+/** Focus a field and leave it, so its blur normalisation runs. */
+async function leaveField(input: HTMLInputElement): Promise<void> {
+  await act(async () => {
+    input.focus()
+    input.blur()
+  })
+  await flush()
 }
 
 /** Flush a chain that spans several awaits (folder pick → adopt → start). */
@@ -1341,6 +1361,83 @@ describe('MonitorPage', () => {
     await flush()
     const auto = host.querySelector('.dsm-grid') as HTMLElement
     expect(auto.style.gridTemplateColumns).toMatch(/^repeat\(\d, minmax\(0, 1fr\)\)$/)
+  })
+
+  it('steps the card budget one card at a time between 2 and 24', async () => {
+    const ids = ['session-1', 'session-2', 'session-3', 'session-4', 'session-5', 'session-6']
+    const list = new Source<SessionListSnapshotLike>({
+      ids,
+      byId: Object.fromEntries(
+        ids.map((id, index) => [
+          id,
+          { id, title: `Session ${index + 1}`, running: false, blank: false, updatedAt: 6_000 - index },
+        ]),
+      ),
+      phase: 'ready',
+    })
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt: vi.fn(async () => ({ ok: true })) },
+          eventSource: new Source(windowOf([])),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const store = new MonitorStore(new FakeStorage())
+    store.setMaxCards(MIN_CARDS)
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={sessions}
+        uiSession={{ sessionStatus: new Source(new Map()) }}
+      />,
+    )
+
+    const field = (): HTMLInputElement | null => host.querySelector<HTMLInputElement>('#dsm-card-budget')
+    const stepButton = (label: string): HTMLButtonElement | null =>
+      host.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`)
+    const cardCount = (): number => host.querySelectorAll('.dsm-card').length
+
+    // The floor is two cards: the field reads 2 and its stepper cannot go lower.
+    expect(field()?.value).toBe(String(MIN_CARDS))
+    expect(stepButton('One fewer card')?.disabled).toBe(true)
+    expect(cardCount()).toBe(MIN_CARDS)
+
+    // One click is exactly one card — no leaps like the old 3/6/9/12 select.
+    await clickNthByLabel('One more card', 0)
+    expect(store.getSnapshot().maxCards).toBe(MIN_CARDS + 1)
+    expect(field()?.value).toBe(String(MIN_CARDS + 1))
+    expect(cardCount()).toBe(MIN_CARDS + 1)
+
+    await clickNthByLabel('One fewer card', 0)
+    expect(store.getSnapshot().maxCards).toBe(MIN_CARDS)
+    expect(stepButton('One fewer card')?.disabled).toBe(true)
+
+    // A typed number inside the range applies directly.
+    await typeIntoField(field() as HTMLInputElement, '4')
+    expect(store.getSnapshot().maxCards).toBe(4)
+    expect(cardCount()).toBe(4)
+
+    // A number above the ceiling is normalised when the field is left, and the
+    // ceiling's step button stops there.
+    await typeIntoField(field() as HTMLInputElement, String(MAX_CARDS_LIMIT + 5))
+    await leaveField(field() as HTMLInputElement)
+    expect(store.getSnapshot().maxCards).toBe(MAX_CARDS_LIMIT)
+    expect(field()?.value).toBe(String(MAX_CARDS_LIMIT))
+    expect(stepButton('One more card')?.disabled).toBe(true)
+    // The catalog holds six sessions, so the raised budget reveals all of them.
+    expect(cardCount()).toBe(ids.length)
+
+    // A number below the floor is raised to it when the field is left.
+    await typeIntoField(field() as HTMLInputElement, '0')
+    await leaveField(field() as HTMLInputElement)
+    expect(store.getSnapshot().maxCards).toBe(MIN_CARDS)
+    expect(field()?.value).toBe(String(MIN_CARDS))
   })
 
   it('sends custom text instead of a chosen label on a single-select question', async () => {

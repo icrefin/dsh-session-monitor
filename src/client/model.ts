@@ -89,8 +89,27 @@ const HUMAN_SOURCES = new Set(['user', 'user-approval', 'user-question-reply'])
 /** Default number of cards the grid shows at once. */
 export const DEFAULT_MAX_CARDS = 9
 
+/** Lowest card budget the toolbar offers. */
+export const MIN_CARDS = 2
+
 /** Hard ceiling on cards, so a huge profile cannot open fifty history streams. */
-export const MAX_CARDS_LIMIT = 16
+export const MAX_CARDS_LIMIT = 24
+
+/**
+ * Normalise a card budget to the values the toolbar can step through.
+ *
+ * The budget is always a whole number in [MIN_CARDS, MAX_CARDS_LIMIT]. A value
+ * of zero means "never stored", so it falls back to the default instead of
+ * clamping to the floor.
+ *
+ * @param max - requested budget.
+ * @returns a whole number between {@link MIN_CARDS} and {@link MAX_CARDS_LIMIT}.
+ */
+export function clampMaxCards(max: number): number {
+  const whole = Number.isFinite(max) ? Math.trunc(max) : DEFAULT_MAX_CARDS
+  const requested = whole === 0 ? DEFAULT_MAX_CARDS : whole
+  return Math.max(MIN_CARDS, Math.min(MAX_CARDS_LIMIT, requested))
+}
 
 /** Hard ceiling on the explicit cards-per-row choice. */
 export const MAX_COLUMNS = 6
@@ -603,10 +622,10 @@ function byPrecedence(left: MonitoredSession, right: MonitoredSession): number {
 /**
  * Normalise a card budget.
  * @param max - requested budget.
- * @returns a budget between 1 and {@link MAX_CARDS_LIMIT}.
+ * @returns a budget between {@link MIN_CARDS} and {@link MAX_CARDS_LIMIT}.
  */
 function budgetOf(max: number): number {
-  return Math.max(1, Math.min(MAX_CARDS_LIMIT, Math.trunc(max) || DEFAULT_MAX_CARDS))
+  return clampMaxCards(max)
 }
 
 /**

@@ -24,6 +24,10 @@ export const en = {
   runningCount: '{count} working',
   /** Toolbar: card budget label. */
   cards: 'Cards',
+  /** Toolbar: lower the card budget by one. */
+  fewerCards: 'One fewer card',
+  /** Toolbar: raise the card budget by one. */
+  moreCards: 'One more card',
   /** Toolbar: cards-per-row label. */
   columns: 'Per row',
   /** Toolbar: automatic grid filling. */
@@ -209,6 +213,8 @@ export const zh: typeof en = {
   waitingCount: '{count} 个待回答',
   runningCount: '{count} 个运行中',
   cards: '卡片数',
+  fewerCards: '减少一张卡片',
+  moreCards: '增加一张卡片',
   columns: '每行',
   auto: '自动',
   restoreAll: '恢复已移除（{count}）',

@@ -1,7 +1,8 @@
 # Handoff — dsh-session-monitor
 
-**Version:** 0.9.1 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
-**Written:** 2026-11-02 · **Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
+**Version:** 0.10.0 · **Runtime:** dsh 0.2.1-rc.5 · **Host:** DeepSeek Harness desktop app
+**Written:** 2026-11-02 · **Updated:** 2026-11-07 (0.10.0, card-budget stepper)
+**Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
 
 This document is for the next person (or agent) picking this work up on **another machine**.
 It records what exists, what was verified, what was not, and what to do next.
@@ -10,9 +11,9 @@ It records what exists, what was verified, what was not, and what to do next.
 
 ## 1. One-paragraph status
 
-The plugin is feature-complete for its stated purpose and passes `pnpm check` (126 tests, both
+The plugin is feature-complete for its stated purpose and passes `pnpm check` (132 tests, both
 halves typechecked, loader bundle built). It is installed into the **desktop profile** on the
-machine where it was written, currently **0.9.1**; a bundle added to a running profile is inert
+machine where it was written, currently **0.10.0**; a bundle added to a running profile is inert
 until the app restarts, so the panel shows the new build only after a relaunch. The panel has **never been seen in the running GUI**: browser control was unavailable to
 the agent that built it. Layout was checked in a local Vite **component fixture** only. Treat
 in-app visual verification as the first open task.
@@ -105,7 +106,7 @@ unused blank session of that Workspace, exactly like the sidebar's own New Sessi
 
 **Retention.** Each card holds one `sessions.retain(id, { source: 'sessionMonitor' })` reference
 while mounted and releases it on unmount. That opens one history/tail stream per card, so the card
-budget (3–16, default 9) is also a stream budget.
+budget (2–24, default 9, stepped one card at a time in the toolbar) is also a stream budget.
 
 **Answering.** `PendingApproval.answer('allowed-once' | 'rejected')`.
 `PendingQuestion.answer({ answers: [{ id, selected, custom }] })`. Host rule: a **single-select**
@@ -138,9 +139,9 @@ host half deliberately — but do not duplicate transport for facts above.
   tool/notice/question/input use `var(--dsh-content-font-size-secondary,13px)`.
 - Top clearance on macOS: `[data-platform=darwin] .dsm-header { padding-top: 28px + var(--dsh-frame-top-clearance) }`.
 
-Known limitation: at 16 cards (4×4 on a 900 px-tall window) a waiting card can fit only the
-question and its answer row; the options/custom field need a small scroll inside the card. At 9
-cards everything is visible.
+Known limitation: at large budgets (16 cards is a 4×4 grid on a 900 px-tall window, and the
+stepper now allows 24) a waiting card can fit only the question and its answer row; the
+options/custom field need a small scroll inside the card. At 9 cards everything is visible.
 
 ---
 
@@ -175,7 +176,7 @@ stall with no error state) was observed in a user screenshot.
   "maxCards": 9, "columns": 0, "newWorkspaceId": "workspace-id" }
 ```
 
-`columns: 0` means Auto. `maxCards` is clamped 1–16, `columns` 0–6. Removal is local by design:
+`columns: 0` means Auto. `maxCards` is clamped 2–24 and is changed one card at a time, `columns` 0–6. Removal is local by design:
 a removed session keeps running, keeps history and stays in the sidebar. `newWorkspaceId` is the
 Workspace the new-session control last used; it is ignored (and replaced) when that Workspace no
 longer exists, and the default is then the Workspace of the most recently used session. `spawned`
@@ -189,14 +190,14 @@ set as soon as the catalog reports the row non-blank.
 ```sh
 cd dsh-session-monitor
 pnpm install
-pnpm check            # typecheck host + client + test, build lib/client.js, run 126 tests
-scripts/install.sh    # packs dist/dsh-session-monitor-0.9.1.tgz (builds first)
+pnpm check            # typecheck host + client + test, build lib/client.js, run 132 tests
+scripts/install.sh    # packs dist/dsh-session-monitor-0.10.0.tgz (builds first)
 ```
 
 Install into a CLI-managed profile:
 
 ```sh
-dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.9.1.tgz
+dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.10.0.tgz
 # then restart the server for the row to compose
 ```
 
@@ -205,7 +206,7 @@ Install into the **Electron desktop profile** (the CLI refuses it):
 ```sh
 cd ~/.dsh/profiles/desktop
 # back up package.json / pnpm-lock.yaml / cordis.patch.yml first
-pnpm add file:<abs-path>/dist/dsh-session-monitor-0.9.1.tgz
+pnpm add file:<abs-path>/dist/dsh-session-monitor-0.10.0.tgz
 # add "dsh-session-monitor" to "dsh.profile.bundles" in package.json
 # restart the app (a bundle added to a running profile is inert until then)
 ```
@@ -222,7 +223,7 @@ composition and bundle serving without touching a live profile.
 
 Proven:
 
-- `pnpm check`: 125 tests — model (selection, budget, transcript, live chunks, whole long messages, grid fit, timestamps,
+- `pnpm check`: 132 tests — model (selection, budget floor/ceiling, transcript, live chunks, whole long messages, grid fit, timestamps,
   Workspace label/default rules, stable replacement with the displaced card kept at the order tail),
   store (persistence incl. the remembered new-session Workspace and the spawned-blank set,
   clamping, notification), manifest (three ids, activation order, version chip),
@@ -230,7 +231,8 @@ Proven:
   jsdom page mount (ordering, live appends, question answer, single-select custom rule, prompt send,
   removal, open failure, silent-store reconcile, both new recovery triggers, the new-session
   control's default Workspace, its start call, folder adoption, a cancelled chooser, a refused
-  start, and a created blank card taking the oldest slot on a full grid), and the **built** bundle
+  start, a created blank card taking the oldest slot on a full grid, and the card-budget stepper
+  moving one card per click and clamping at 2 and 24), and the **built** bundle
   behind a fake loader (loader id, exports, real `apply`, no second React).
 - An isolated dsh profile composed the row and served
   `/plugins/??dsh-session-monitor/client.js&rev=…` with HTTP 200.
@@ -294,11 +296,11 @@ check ran the web app in Chrome, which is the same client bundle but not the des
 4. **Open-session action** on each card (select the conversation for that session). The layout
    service can select the `conversation` panel; session selection needs a supported client path —
    investigate before adding.
-5. **Tiny-cell question UI.** At 16 cards, options need a scroll. Consider a compact answer mode or
+5. **Tiny-cell question UI.** At large budgets (16 cards and beyond), options need a scroll. Consider a compact answer mode or
    letting a waiting card span two rows without breaking the one-page contract.
 6. **Idle-session noise.** Consider folding old idle sessions behind a "show older" toggle or
    grouping by Workspace, while keeping recency ordering.
-7. **Measure** client memory and message volume with 9 and 16 retained streams.
+7. **Measure** client memory and message volume with 9 and 24 retained streams.
 
 ---
 
@@ -372,3 +374,4 @@ Remember: a fixture screenshot proves layout, **not** app behaviour.
 | 0.8.0 | Toolbar New Session button with a Workspace drop-down; "Choose a folder…" adopts a directory as a Workspace and starts the session there |
 | 0.9.0 | Creating a session keeps the monitor open: its blank card joins the frozen order (oldest slot on a full grid) and a displaced card stays at the order tail, so the grid neither navigates nor churns |
 | 0.9.1 | The frozen order is stored with the preferences: a panel switch or app restart resumes the same cells, a `pending` catalog never re-seeds it, and a smaller budget only hides the order's tail instead of re-ranking |
+| 0.10.0 | The toolbar's card-budget select becomes a stepper: one card per increment, an editable number between 2 and 24, and the stored/clamped range widened from 1–16 to 2–24 |

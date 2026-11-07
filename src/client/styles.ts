@@ -44,6 +44,17 @@ export const PANEL_CSS = `
 .dsm-btn[data-danger=true]:hover:not(:disabled){color:var(--dsw-alias-state-error-primary);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 18%,transparent)}
 .dsm-select{height:28px;padding:0 6px;font:inherit;font-size:12px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-module-platform);border:0.5px solid var(--dsw-alias-border-l3);border-radius:8px}
 .dsm-select:focus-visible{outline:2px solid var(--dsw-alias-brand-primary)}
+.dsm-budget{display:inline-flex;align-items:center;gap:6px;flex:none}
+.dsm-budgetLabel{font-size:11px;font-weight:500;line-height:18px;color:var(--dsw-alias-label-secondary);white-space:nowrap}
+.dsm-stepper{display:inline-flex;align-items:stretch;height:28px;box-sizing:border-box;overflow:hidden;background:var(--dsw-alias-bg-module-platform);border:0.5px solid var(--dsw-alias-border-l3);border-radius:8px}
+.dsm-stepperBtn{display:grid;place-items:center;width:24px;padding:0;font:inherit;font-size:14px;line-height:1;color:var(--dsw-alias-label-secondary);background:none;border:0;cursor:pointer}
+.dsm-stepperBtn:hover:not(:disabled){color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover)}
+.dsm-stepperBtn:active:not(:disabled){background:var(--dsw-alias-interactive-bg-active)}
+.dsm-stepperBtn:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
+.dsm-stepperBtn:disabled{opacity:.4;cursor:default}
+.dsm-stepperValue{box-sizing:border-box;width:36px;padding:0;font:inherit;font-size:12px;font-weight:500;line-height:26px;text-align:center;font-variant-numeric:tabular-nums;color:var(--dsw-alias-label-secondary);background:none;border:0;border-left:0.5px solid var(--dsw-alias-border-l3);border-right:0.5px solid var(--dsw-alias-border-l3);appearance:textfield;-moz-appearance:textfield}
+.dsm-stepperValue::-webkit-outer-spin-button,.dsm-stepperValue::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.dsm-stepperValue:focus-visible{color:var(--dsw-alias-label-primary);outline:2px solid var(--dsw-alias-brand-primary);outline-offset:-2px}
 
 .dsm-newSession{display:flex;align-items:center;gap:6px;flex:none;min-width:0}
 .dsm-newGlyph{display:inline-flex;flex:none;align-items:center;vertical-align:-2px;margin-right:5px}

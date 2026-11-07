@@ -90,9 +90,11 @@ steps. Read it before changing behaviour.
   frozen order and raising it reveals that same tail again, in place; nothing is
   re-ranked, so a card never changes cells because of activity or a settings
   change.
-- **Card budget.** The toolbar shows 3–16 cards (default 9) for idle and running
-  sessions. A session **waiting for the user is never cut off by the budget** —
-  it is the reason the panel exists.
+- **Card budget.** The toolbar's **Cards** stepper moves the budget one card at
+  a time, from **2** up to **24** (default 9), for idle and running sessions. The
+  number in the middle is editable, and a value typed outside the range is
+  normalised when the field is left. A session **waiting for the user is never cut
+  off by the budget** — it is the reason the panel exists.
 - **Cards per row.** The toolbar's **Per row** control sets an exact count (2–6)
   or leaves the grid on **Auto**, which fills the column with 260px cards. The
   choice is remembered beside the removed ids.
@@ -258,17 +260,18 @@ answer was accepted.
 ## Verified
 
 - `pnpm check` — typecheck of both halves and the tests, the built bundle, then
-  the test run: **130 tests**, including a jsdom mount of the real page against
+  the test run: **132 tests**, including a jsdom mount of the real page against
   fake projections (ordering, live window, question answer, prompt send, removal,
   open failure, a long answer rendered whole, the new-session control's default
   Workspace, its start call, folder adoption, a cancelled chooser and a refused
   start), a created blank session taking the oldest card's slot on the page
   without navigating, a card keeping its cell across a panel remount and a reload,
-  a smaller card budget hiding the order's tail instead of re-ranking it, a
-  `pending` catalog leaving the stored order alone, a stylesheet guard (every
-  rendered class has a rule; no literal colours), and an execution of the **built**
-  bundle behind a fake module loader (bundle id, exports, real `apply` wiring, no
-  second React).
+  a smaller card budget hiding the order's tail instead of re-ranking it, the
+  toolbar's card-budget stepper moving one card at a time and stopping at 2 and
+  24, a `pending` catalog leaving the stored order alone, a stylesheet guard
+  (every rendered class has a rule; no literal colours), and an execution of the
+  **built** bundle behind a fake module loader (bundle id, exports, real `apply`
+  wiring, no second React).
 - `scripts/dev-profile.sh` — an isolated profile boots the row and serves
   `/plugins/dsh-session-monitor/client.js`.
 - Not verified: the panel's pixels. This session had no browser control, so the
@@ -295,6 +298,7 @@ imported at the next start.
 src/index.ts                     host half: identity only, registers nothing
 src/client/index.tsx             sidebar row + main page registration
 src/client/MonitorPage.tsx       grid, toolbar, card selection
+src/client/CardBudgetControl.tsx card-budget stepper (− / number / +)
 src/client/NewSessionControl.tsx new-session button + Workspace drop-down
 src/client/SessionCard.tsx       one card: header, transcript, pending, composer
 src/client/InteractionCard.tsx   question/approval answer block

@@ -11,7 +11,7 @@
 
 import { describe, expect, it, vi } from 'vitest'
 import { MonitorStore, STORAGE_KEY, parsePrefs } from '../src/client/store.ts'
-import { DEFAULT_MAX_CARDS, MAX_CARDS_LIMIT, MAX_COLUMNS, ORDER_LIMIT } from '../src/client/model.ts'
+import { DEFAULT_MAX_CARDS, MAX_CARDS_LIMIT, MAX_COLUMNS, MIN_CARDS, ORDER_LIMIT } from '../src/client/model.ts'
 
 /** In-memory storage that records the last written value. */
 class FakeStorage {
@@ -51,7 +51,8 @@ describe('parsePrefs', () => {
   it('reads ids and clamps the card budget', () => {
     expect([...parsePrefs('{"hidden":["a","b",3,""],"maxCards":2}').hidden]).toEqual(['a', 'b'])
     expect(parsePrefs('{"maxCards":9999}').maxCards).toBe(MAX_CARDS_LIMIT)
-    expect(parsePrefs('{"maxCards":-4}').maxCards).toBe(1)
+    expect(parsePrefs('{"maxCards":-4}').maxCards).toBe(MIN_CARDS)
+    expect(parsePrefs('{"maxCards":1}').maxCards).toBe(MIN_CARDS)
     expect(parsePrefs('{"maxCards":"9"}').maxCards).toBe(DEFAULT_MAX_CARDS)
   })
 
@@ -132,6 +133,26 @@ describe('MonitorStore', () => {
     expect(store.getSnapshot().columns).toBe(0)
     store.setColumns(3)
     expect(new MonitorStore(storage).getSnapshot().columns).toBe(3)
+  })
+
+  it('steps the card budget one at a time inside the supported range', () => {
+    const storage = new FakeStorage()
+    const store = new MonitorStore(storage)
+    // One click of the stepper is exactly one card: no leap over the middle.
+    store.setMaxCards(DEFAULT_MAX_CARDS + 1)
+    expect(store.getSnapshot().maxCards).toBe(DEFAULT_MAX_CARDS + 1)
+    store.setMaxCards(DEFAULT_MAX_CARDS)
+    expect(store.getSnapshot().maxCards).toBe(DEFAULT_MAX_CARDS)
+    // The floor and the ceiling hold for every caller, not only the toolbar.
+    store.setMaxCards(1)
+    expect(store.getSnapshot().maxCards).toBe(MIN_CARDS)
+    store.setMaxCards(MAX_CARDS_LIMIT + 5)
+    expect(store.getSnapshot().maxCards).toBe(MAX_CARDS_LIMIT)
+    // At the ceiling a further step is not a change and must not write.
+    const writes = storage.writes
+    store.setMaxCards(MAX_CARDS_LIMIT)
+    expect(storage.writes).toBe(writes)
+    expect(new MonitorStore(storage).getSnapshot().maxCards).toBe(MAX_CARDS_LIMIT)
   })
 
   it('keeps a created blank session as a card until its first turn', () => {

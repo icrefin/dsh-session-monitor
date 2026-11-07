@@ -25,6 +25,8 @@ import {
   formatCompactTokens,
   formatExactTokens,
   gridRows,
+  MAX_CARDS_LIMIT,
+  MIN_CARDS,
   needsPermissionConfirmation,
   permissionLabelKey,
   monitorState,
@@ -205,16 +207,21 @@ describe('selectMonitored', () => {
     const statuses = new Map<string, SessionStatusLike>([
       ['asked', { pendingInteraction: { kind: 'approval' } }],
     ])
+    // A budget below the floor is raised to two ordinary cards, and the waiting
+    // session still sits outside that budget.
     const picked = selectMonitored(catalog(rows), statuses, new Set(), 1)
-    expect(picked.map((entry) => entry.id)).toEqual(['asked', 'a1'])
+    expect(picked.map((entry) => entry.id)).toEqual(['asked', 'a1', 'a2'])
   })
 
   it('clamps the budget to the supported range', () => {
-    const rows = Array.from({ length: 40 }, (_, index) => row(`s${index}`))
+    const rows = Array.from({ length: 60 }, (_, index) => row(`s${index}`))
     const picked = selectMonitored(catalog(rows), undefined, new Set(), 999)
-    // 16 is the hard ceiling; waiting sessions are none, so the budget applies.
-    expect(picked.length).toBe(16)
-    expect(DEFAULT_MAX_CARDS).toBeLessThanOrEqual(16)
+    // MAX_CARDS_LIMIT is the hard ceiling; waiting sessions are none, so the
+    // budget applies here.
+    expect(picked.length).toBe(MAX_CARDS_LIMIT)
+    expect(selectMonitored(catalog(rows), undefined, new Set(), -3)).toHaveLength(MIN_CARDS)
+    expect(DEFAULT_MAX_CARDS).toBeGreaterThanOrEqual(MIN_CARDS)
+    expect(DEFAULT_MAX_CARDS).toBeLessThanOrEqual(MAX_CARDS_LIMIT)
   })
 
   it('labels each card with its Workspace title, falling back to the path', () => {
@@ -565,10 +572,10 @@ describe('frozen grid order', () => {
   })
 
   it('never displaces a waiting card, replacing the oldest ordinary one instead', () => {
-    const candidates = [card('a', 5, 'waiting'), card('b', 30), card('c', 40)]
+    const candidates = [card('a', 5, 'waiting'), card('b', 30), card('d', 35), card('c', 40)]
     // Measured by index: `a` stays at 0 while `b` (ordinary, index 1) yields.
-    expect(reconcileOrder(['a', 'b'], candidates, 1)).toEqual(['a', 'c', 'b'])
-    expect(displayOrder(['a', 'c', 'b'], candidates, 1)).toEqual(['a', 'c'])
+    expect(reconcileOrder(['a', 'b', 'd'], candidates, 2)).toEqual(['a', 'c', 'd', 'b'])
+    expect(displayOrder(['a', 'c', 'd', 'b'], candidates, 2)).toEqual(['a', 'c', 'd'])
   })
 
   it('keeps the frozen order when the budget shrinks, and reveals it again when it grows', () => {
@@ -580,8 +587,9 @@ describe('frozen grid order', () => {
   })
 
   it('always shows a waiting card, even past the ordinary budget', () => {
-    const candidates = [card('a', 10), card('b', 20, 'waiting'), card('c', 30)]
-    expect(displayOrder(['a', 'b', 'c'], candidates, 1)).toEqual(['a', 'b'])
+    const candidates = [card('a', 10), card('b', 20, 'waiting'), card('c', 30), card('d', 40)]
+    // Two ordinary cards fit; the waiting card sits outside that budget.
+    expect(displayOrder(['a', 'b', 'c', 'd'], candidates, 2)).toEqual(['a', 'b', 'c'])
   })
 
   it('never re-ranks when the budget shrinks: it hides the tail and keeps the rest in place', () => {

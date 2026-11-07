@@ -10,7 +10,7 @@
  * @module dsh-session-monitor/client/store
  */
 
-import { DEFAULT_MAX_CARDS, MAX_CARDS_LIMIT, MAX_COLUMNS, ORDER_LIMIT } from './model.ts'
+import { clampMaxCards, DEFAULT_MAX_CARDS, MAX_COLUMNS, ORDER_LIMIT } from './model.ts'
 
 /** Storage key of the monitor's preferences. */
 export const STORAGE_KEY = 'dsh-session-monitor:prefs'
@@ -112,7 +112,7 @@ export function parsePrefs(raw: string | null): MonitorPrefs {
         if (spawned.size >= SPAWNED_LIMIT) break
       }
     }
-    const max = typeof record.maxCards === 'number' && Number.isFinite(record.maxCards) ? Math.trunc(record.maxCards) : DEFAULT_MAX_CARDS
+    const max = typeof record.maxCards === 'number' && Number.isFinite(record.maxCards) ? record.maxCards : DEFAULT_MAX_CARDS
     const columns = typeof record.columns === 'number' && Number.isFinite(record.columns) ? Math.trunc(record.columns) : 0
     const order: string[] = []
     if (Array.isArray(record.order)) {
@@ -127,7 +127,7 @@ export function parsePrefs(raw: string | null): MonitorPrefs {
       acknowledged,
       spawned,
       order,
-      maxCards: Math.max(1, Math.min(MAX_CARDS_LIMIT, max || DEFAULT_MAX_CARDS)),
+      maxCards: clampMaxCards(max),
       columns: Math.max(0, Math.min(MAX_COLUMNS, columns)),
       newWorkspaceId:
         typeof record.newWorkspaceId === 'string' && record.newWorkspaceId !== ''
@@ -292,7 +292,7 @@ export class MonitorStore implements MonitorPrefsSource {
    * @param maxCards - requested budget; clamped to the supported range.
    */
   setMaxCards(maxCards: number): void {
-    const next = Math.max(1, Math.min(MAX_CARDS_LIMIT, Math.trunc(maxCards) || DEFAULT_MAX_CARDS))
+    const next = clampMaxCards(maxCards)
     if (next === this.#snapshot.maxCards) return
     this.#commit({ ...this.#snapshot, maxCards: next })
   }

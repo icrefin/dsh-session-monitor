@@ -16,16 +16,15 @@ import type { MonitorTranslate } from './locales.ts'
 import {
   autoColumns,
   collectSessions,
-  DEFAULT_MAX_CARDS,
   defaultWorkspaceId,
   displayOrder,
   gridRows,
-  MAX_CARDS_LIMIT,
   MAX_COLUMNS,
   orderOrSeed,
 } from './model.ts'
 import type { MonitorStore } from './store.ts'
 import type { MonitorPrefs } from './store.ts'
+import { CardBudgetControl } from './CardBudgetControl.tsx'
 import { NewSessionControl } from './NewSessionControl.tsx'
 import { SessionCard } from './SessionCard.tsx'
 import type {
@@ -68,9 +67,6 @@ export interface MonitorPageProps {
    */
   readonly newSession?: NewSessionActionsLike | undefined
 }
-
-/** Card budgets the toolbar offers. */
-const CARD_CHOICES = [3, 6, 9, 12, MAX_CARDS_LIMIT]
 
 /** Explicit cards-per-row choices; `0` (Auto) is offered separately. */
 const COLUMN_CHOICES = [2, 3, 4, 5, MAX_COLUMNS]
@@ -163,6 +159,7 @@ export function MonitorPage({
   const subscribePrefs = useCallback((listener: () => void) => store.subscribe(listener), [store])
   const readPrefs = useCallback((): MonitorPrefs => store.getSnapshot(), [store])
   const prefs = useSyncExternalStore(subscribePrefs, readPrefs, readPrefs)
+  const handleMaxCards = useCallback((value: number): void => store.setMaxCards(value), [store])
 
   const [now, setNow] = useState<number>(() => Date.now())
   useEffect(() => {
@@ -355,21 +352,7 @@ export function MonitorPage({
             </span>
           )}
           <span className="dsm-spacer" />
-          <label className="dsm-stat" htmlFor="dsm-card-budget">
-            {t('cards')}
-            <select
-              id="dsm-card-budget"
-              className="dsm-select"
-              value={prefs.maxCards}
-              onChange={(event) => store.setMaxCards(Number(event.target.value) || DEFAULT_MAX_CARDS)}
-            >
-              {CARD_CHOICES.map((choice) => (
-                <option key={choice} value={choice}>
-                  {choice}
-                </option>
-              ))}
-            </select>
-          </label>
+          <CardBudgetControl t={t} value={prefs.maxCards} onChange={handleMaxCards} />
           <label className="dsm-stat" htmlFor="dsm-columns">
             {t('columns')}
             <select
