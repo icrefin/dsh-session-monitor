@@ -1,17 +1,5 @@
 # dsh-session-monitor
 
-One live grid for every active and recently used session: transcript, pending questions, queued prompts.
-**English** | [简体中文](README.zh-CN.md)
-
-[![License](https://img.shields.io/github/license/icrefin/dsh-session-monitor?style=flat-square)](LICENSE)
-[![Release](https://img.shields.io/github/v/release/icrefin/dsh-session-monitor?style=flat-square)](https://github.com/icrefin/dsh-session-monitor/releases)
-[![CI](https://img.shields.io/github/actions/workflow/status/icrefin/dsh-session-monitor/ci.yml?branch=main&style=flat-square)](https://github.com/icrefin/dsh-session-monitor/actions/workflows/ci.yml)
-[![Last commit](https://img.shields.io/github/last-commit/icrefin/dsh-session-monitor?style=flat-square)](https://github.com/icrefin/dsh-session-monitor/commits/main)
-[![Stars](https://img.shields.io/github/stars/icrefin/dsh-session-monitor?style=flat-square)](https://github.com/icrefin/dsh-session-monitor/stargazers)
-[![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen?style=flat-square)](.github/CONTRIBUTING.md)
-[![Node](https://img.shields.io/badge/node-%3E%3D22.17-339933?style=flat-square&logo=node.js)](https://nodejs.org)
-[![dsh](https://img.shields.io/badge/dsh-0.2.1--rc.5-4B5563?style=flat-square)](https://github.com/deepseek-ai/deepseek-harness)
-
 DeepSeek Harness shows one conversation at a time. While several sessions work in
 parallel, the sidebar tells you *that* a session is running or waiting — the
 question itself, the turn it is in, and the message it wants to send stay behind
@@ -312,14 +300,6 @@ src/client/styles.ts             theme-token stylesheet
 test/                            model, store, manifest, page (jsdom), built bundle
 ```
 
-## Contributing
-
-Issues and pull requests are welcome — see [CONTRIBUTING.md](.github/CONTRIBUTING.md)
-for the development setup and the sign-off expectation. Please report security
-issues privately as described in [SECURITY.md](.github/SECURITY.md).
-
 ## License
 
-MIT — see [LICENSE](./LICENSE).
-
-> If this grid saves you a tab-switching round trip, a ⭐ star helps other DSH users find it.
+MIT.
