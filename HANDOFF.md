@@ -1,7 +1,7 @@
 # Handoff — dsh-session-monitor
 
-**Version:** 0.11.1 · **Runtime:** dsh 0.2.2-rc.1 · **Host:** DeepSeek Harness desktop app
-**Written:** 2026-11-02 · **Updated:** 2026-11-08 (0.11.1: rebuilt for dsh 0.2.2-rc.1; the 0.11.0 card-budget change is unchanged)
+**Version:** 0.11.1 · **Runtime:** dsh 0.2.2-rc.2 · **Host:** DeepSeek Harness desktop app
+**Written:** 2026-11-02 · **Updated:** 2026-11-08 (0.11.1: rebuilt for dsh 0.2.2-rc.2; the 0.11.0 card-budget change is unchanged)
 **Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
 
 This document is for the next person (or agent) picking this work up on **another machine**.
@@ -192,13 +192,13 @@ set as soon as the catalog reports the row non-blank.
 cd dsh-session-monitor
 pnpm install
 pnpm check            # typecheck host + client + test, build lib/client.js, run 133 tests
-scripts/install.sh    # packs dist/dsh-session-monitor-0.11.1.tgz (builds first)
+scripts/install.sh    # packs dist/dsh-session-monitor-0.11.2.tgz (builds first)
 ```
 
 Install into a CLI-managed profile:
 
 ```sh
-dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.11.1.tgz
+dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.11.2.tgz
 # then restart the server for the row to compose
 ```
 
@@ -207,7 +207,7 @@ Install into the **Electron desktop profile** (the CLI refuses it):
 ```sh
 cd ~/.dsh/profiles/desktop
 # back up package.json / pnpm-lock.yaml / cordis.patch.yml first
-pnpm add file:<abs-path>/dist/dsh-session-monitor-0.11.1.tgz
+pnpm add file:<abs-path>/dist/dsh-session-monitor-0.11.2.tgz
 # add "dsh-session-monitor" to "dsh.profile.bundles" in package.json
 # restart the app (a bundle added to a running profile is inert until then)
 ```

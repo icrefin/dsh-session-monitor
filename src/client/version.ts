@@ -10,4 +10,4 @@
  */
 
 /** Semver of the built artifact. */
-export const VERSION = '0.11.1'
+export const VERSION = '0.11.2'
