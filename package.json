@@ -1,15 +1,7 @@
 {
   "name": "dsh-session-monitor",
-  "version": "0.11.2",
+  "version": "0.11.3",
   "description": "Multi-grid live monitor for every active and recently used session: transcript, pending questions and prompts, all in one panel",
-  "repository": {
-    "type": "git",
-    "url": "git+https://github.com/icrefin/dsh-session-monitor.git"
-  },
-  "homepage": "https://github.com/icrefin/dsh-session-monitor#readme",
-  "bugs": {
-    "url": "https://github.com/icrefin/dsh-session-monitor/issues"
-  },
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -27,7 +19,7 @@
   "type": "module",
   "engines": {
     "node": ">=24.9.0",
-    "dsh": "0.2.2-rc.2"
+    "dsh": "0.2.2-rc.3"
   },
   "main": "lib/index.js",
   "types": "lib/types/index.d.ts",
@@ -76,17 +68,17 @@
   },
   "peerDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
-    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-client-ui-layout": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-client-ui-sidebar": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-layout": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.2.2-rc.3",
     "react": "^18.2.0"
   },
   "devDependencies": {
     "@deepseek-ai/cordis": "~4.1.0",
-    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-client-ui-layout": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-client-ui-sidebar": "0.2.2-rc.2",
-    "@deepseek-ai/dsh-client-ui-slots": "0.2.2-rc.2",
+    "@deepseek-ai/dsh-client-locale": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-layout": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-sidebar": "0.2.2-rc.3",
+    "@deepseek-ai/dsh-client-ui-slots": "0.2.2-rc.3",
     "@types/node": "^24.19.2",
     "@types/react": "~18.3.1",
     "@types/react-dom": "~18.3.0",
@@ -97,6 +89,14 @@
     "typescript": "^5.7.2",
     "unrun": "^0.3.1",
     "vitest": "^3.0.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/icrefin/dsh-session-monitor.git"
+  },
+  "homepage": "https://github.com/icrefin/dsh-session-monitor#readme",
+  "bugs": {
+    "url": "https://github.com/icrefin/dsh-session-monitor/issues"
   },
   "packageManager": "pnpm@11.20.0"
 }
