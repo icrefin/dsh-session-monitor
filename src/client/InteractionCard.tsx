@@ -16,8 +16,8 @@
 
 import { useState, type ReactElement } from 'react'
 import type { MonitorTranslate } from './locales.ts'
-import { isAnswerable, textField } from './model.ts'
-import type { PendingInteractionLike, QuestionLike } from './types.ts'
+import { isAnswerable, localizedText, textField } from './model.ts'
+import type { PendingInteractionLike, QuestionLike, ResolveTextLike } from './types.ts'
 
 /** Props of one pending-interaction block. */
 export interface InteractionCardProps {
@@ -25,6 +25,14 @@ export interface InteractionCardProps {
   readonly interaction: PendingInteractionLike
   /** Bound translate seat. */
   readonly t: MonitorTranslate
+  /**
+   * Resolve a `displayReason` locale map through the active UI language.
+   *
+   * Optional: without it the map's English entry is shown. Either way the block
+   * renders a string, never the map itself — an object child would throw during
+   * render and blank the whole panel.
+   */
+  readonly resolveText?: ResolveTextLike | undefined
 }
 
 /** One question's draft: chosen labels plus free text. */
@@ -33,9 +41,12 @@ interface Draft {
   readonly custom: string
 }
 
-/** Read the questions of a carrier as a safe array. */
+/** Read the questions of a carrier as a safe array of objects. */
 function questionsOf(interaction: PendingInteractionLike): readonly QuestionLike[] {
-  return Array.isArray(interaction.questions) ? interaction.questions : []
+  if (!Array.isArray(interaction.questions)) return []
+  return interaction.questions.filter(
+    (question): question is QuestionLike => typeof question === 'object' && question !== null,
+  )
 }
 
 /**
@@ -45,7 +56,8 @@ function questionsOf(interaction: PendingInteractionLike): readonly QuestionLike
  * @returns the identity used for draft state.
  */
 function questionKey(question: QuestionLike, index: number): string {
-  return question.id ?? `q${index}`
+  const id = question.id
+  return typeof id === 'string' && id !== '' ? id : `q${index}`
 }
 
 /**
@@ -54,8 +66,10 @@ function questionKey(question: QuestionLike, index: number): string {
  * @returns its text, header, or a fallback.
  */
 function questionText(question: QuestionLike): string {
-  const text = question.question ?? question.detail ?? question.header
-  return typeof text === 'string' && text.trim() !== '' ? text : ''
+  for (const candidate of [question.question, question.detail, question.header]) {
+    if (typeof candidate === 'string' && candidate.trim() !== '') return candidate
+  }
+  return ''
 }
 
 /**
@@ -63,7 +77,7 @@ function questionText(question: QuestionLike): string {
  * @param props - the carrier and the translate seat.
  * @returns the block, or `null`.
  */
-export function InteractionCard({ interaction, t }: InteractionCardProps): ReactElement | null {
+export function InteractionCard({ interaction, t, resolveText }: InteractionCardProps): ReactElement | null {
   const [busy, setBusy] = useState(false)
   const [failed, setFailed] = useState(false)
   const [settled, setSettled] = useState(false)
@@ -94,12 +108,23 @@ export function InteractionCard({ interaction, t }: InteractionCardProps): React
   }
 
   if (kind === 'approval') {
-    const toolName = interaction.toolName ?? 'tool'
-    const reason = interaction.displayReason ?? interaction.reason
+    /**
+     * An approval names its copy in two ways: `displayReason` is a **locale map**
+     * (`{ en, zh, … }`) for the presentation text, and `reason` is the plain
+     * audit sentence. The map is resolved to one string here; rendering it as an
+     * object would throw "Objects are not valid as a React child" and take the
+     * whole panel down with it.
+     */
+    const toolName =
+      typeof interaction.toolName === 'string' && interaction.toolName.trim() !== ''
+        ? interaction.toolName
+        : 'tool'
+    const reason =
+      localizedText(interaction.displayReason, resolveText) ?? localizedText(interaction.reason)
     return (
       <section className="dsm-pending" aria-label={t('approvalTitle', { tool: toolName })}>
         <div className="dsm-pendingTitle">{t('approvalTitle', { tool: toolName })}</div>
-        {reason === undefined || reason === '' ? null : (
+        {reason === undefined ? null : (
           <p className="dsm-pendingReason">
             {t('reason')}: {reason}
           </p>
@@ -160,7 +185,7 @@ export function InteractionCard({ interaction, t }: InteractionCardProps): React
       // chosen label, so `selected` is empty there; a multi-select answer may
       // carry both. Sending both on a single-select question is rejected.
       return {
-        id: question.id ?? id,
+        id: typeof question.id === 'string' && question.id !== '' ? question.id : id,
         selected: custom === '' || question.multiSelect === true ? [...draft.selected] : [],
         ...(custom === '' ? {} : { custom }),
       }
@@ -169,7 +194,10 @@ export function InteractionCard({ interaction, t }: InteractionCardProps): React
   }
 
   const skip = (): void => {
-    const answers = questions.map((question, index) => ({ id: question.id ?? questionKey(question, index), selected: [] }))
+    const answers = questions.map((question, index) => ({
+      id: typeof question.id === 'string' && question.id !== '' ? question.id : questionKey(question, index),
+      selected: [],
+    }))
     settleWith({ answers })
   }
 
@@ -182,20 +210,22 @@ export function InteractionCard({ interaction, t }: InteractionCardProps): React
         const draft = draftOf(key)
         const options = Array.isArray(question.options) ? question.options : []
         const text = questionText(question)
+        const header = typeof question.header === 'string' ? question.header : undefined
         return (
           <div className="dsm-question" key={key}>
-            {question.header === undefined || question.header === '' ? null : (
-              <div className="dsm-questionHeader">{question.header}</div>
+            {header === undefined || header === '' ? null : (
+              <div className="dsm-questionHeader">{header}</div>
             )}
             {text === '' ? null : <p className="dsm-questionText">{text}</p>}
             {options.length === 0 ? <div className="dsm-hint">{t('noOptions')}</div> : null}
             <div className="dsm-options" role="group">
-              {options.map((option) => {
-                const label = option.label ?? ''
+              {options.map((option, optionIndex) => {
+                if (typeof option !== 'object' || option === null) return null
+                const label = typeof option.label === 'string' ? option.label : ''
                 if (label === '') return null
                 return (
                   <button
-                    key={label}
+                    key={`${label}:${optionIndex}`}
                     type="button"
                     className="dsm-option"
                     aria-pressed={draft.selected.includes(label)}

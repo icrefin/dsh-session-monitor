@@ -64,7 +64,11 @@ export const PANEL_CSS = `
 .dsm-divider{flex:none;width:1px;height:16px;margin:0 2px;background:var(--dsw-alias-border-l2)}
 
 .dsm-grid{display:grid;flex:1 1 auto;gap:12px;min-height:0;min-width:0}
-.dsm-card{display:flex;flex-direction:column;box-sizing:border-box;height:100%;min-height:0;overflow:hidden;container-type:inline-size;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1)}
+/* The head stack runs one step above the transcript: the title is the content
+   size plus 4px (18px at the 14px default), and the workspace/state/time line
+   below it is exactly 1.5x smaller than that title (12px), so both keep
+   following the global content font setting together. */
+.dsm-card{display:flex;flex-direction:column;box-sizing:border-box;height:100%;min-height:0;overflow:hidden;container-type:inline-size;border:1px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-layer-1);--dsm-card-title-size:calc(var(--dsh-content-font-size,14px) + 4px);--dsm-card-sub-size:calc(var(--dsm-card-title-size) / 1.5)}
 .dsm-card[data-state=waiting]{border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 45%,var(--dsw-alias-border-l2))}
 .dsm-cardHead{display:flex;flex:none;align-items:center;gap:6px;padding:5px 6px 5px 9px;border-bottom:1px solid var(--dsw-alias-border-l1)}
 .dsm-dot{flex:none;width:8px;height:8px;border-radius:50%;background:var(--dsw-alias-label-tertiary)}
@@ -72,11 +76,11 @@ export const PANEL_CSS = `
 .dsm-dot[data-state=waiting]{background:var(--dsw-alias-state-warn-primary);animation:dsm-blink 1.4s ease-in-out infinite}
 .dsm-dot[data-state=completed]{background:var(--dsw-alias-state-success-primary)}
 .dsm-cardHeadText{display:flex;flex-direction:column;min-width:0;flex:1 1 auto}
-.dsm-cardTitle{font-size:var(--dsh-content-font-size,14px);font-weight:600;line-height:calc(19px + var(--dsh-content-font-delta,0px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.dsm-cardOpen{display:block;width:100%;box-sizing:border-box;margin:0;padding:0;text-align:left;font:inherit;font-size:var(--dsh-content-font-size,14px);font-weight:600;line-height:calc(19px + var(--dsh-content-font-delta,0px));color:inherit;background:none;border:0;cursor:pointer}
+.dsm-cardTitle{font-size:var(--dsm-card-title-size);font-weight:600;line-height:calc(24px + var(--dsh-content-font-delta,0px));white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dsm-cardOpen{display:block;width:100%;box-sizing:border-box;margin:0;padding:0;text-align:left;font:inherit;font-size:var(--dsm-card-title-size);font-weight:600;line-height:calc(24px + var(--dsh-content-font-delta,0px));color:inherit;background:none;border:0;cursor:pointer}
 .dsm-cardOpen:hover{text-decoration:underline}
 .dsm-cardOpen:focus-visible{outline:2px solid var(--dsw-alias-brand-primary);outline-offset:1px;border-radius:4px}
-.dsm-cardSub{display:flex;align-items:baseline;min-width:0;font-size:10px;line-height:14px;color:var(--dsw-alias-label-caption);white-space:nowrap;overflow:hidden}
+.dsm-cardSub{display:flex;align-items:baseline;min-width:0;font-size:var(--dsm-card-sub-size);line-height:calc(16px + var(--dsh-content-font-delta,0px));color:var(--dsw-alias-label-caption);white-space:nowrap;overflow:hidden}
 .dsm-cardSub>span{flex:none}
 .dsm-cardSub>span+span::before{content:"·";margin:0 5px;color:var(--dsw-alias-label-caption)}
 .dsm-cardWorkspace{flex:0 1 auto!important;min-width:0;overflow:hidden;text-overflow:ellipsis;color:var(--dsw-alias-label-primary);font-weight:500}
@@ -175,6 +179,11 @@ export const PANEL_CSS = `
 .dsm-empty{display:flex;flex:1 1 auto;flex-direction:column;align-items:center;justify-content:center;min-height:0;gap:6px;padding:24px;border:1px dashed var(--dsw-alias-border-l2);border-radius:12px;text-align:center;color:var(--dsw-alias-label-secondary)}
 .dsm-emptyTitle{font-size:13px;font-weight:600;line-height:18px;color:var(--dsw-alias-label-primary)}
 .dsm-emptyBody{font-size:12px;line-height:18px}
+.dsm-failed{display:flex;flex:0 0 auto;flex-direction:column;align-items:flex-start;gap:8px;box-sizing:border-box;max-width:62ch;margin:auto;padding:20px 22px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-module-platform);text-align:left}
+.dsm-failedTitle{font-size:14px;font-weight:600;line-height:20px;color:var(--dsw-alias-label-primary)}
+.dsm-failedBody{margin:0;font-size:12.5px;line-height:19px;color:var(--dsw-alias-label-secondary)}
+.dsm-failedBody[data-detail=true]{font-family:var(--dsh-code-font-family,ui-monospace,monospace);font-size:11.5px;line-height:17px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere}
+.dsm-failedActions{display:flex;align-items:center;gap:8px;margin-top:2px}
 
 @keyframes dsm-blink{0%,100%{opacity:.35}50%{opacity:1}}
 @keyframes dsm-pulse{0%{box-shadow:0 0 0 0 color-mix(in srgb,var(--dsw-alias-state-business-primary) 45%,transparent)}70%{box-shadow:0 0 0 5px transparent}100%{box-shadow:0 0 0 0 transparent}}

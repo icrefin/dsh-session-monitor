@@ -77,8 +77,15 @@ export interface PendingInteractionLike {
   readonly toolName?: string
   /** Human-readable reason supplied by the asker. */
   readonly reason?: string
-  /** Localized presentation copy, when the asker supplied one. */
-  readonly displayReason?: string
+  /**
+   * Localized presentation copy, when the asker supplied one.
+   *
+   * The Host publishes this as a **map of locale tag → text** (`{ en, zh, … }`),
+   * not as one ready string: every sandbox-escalation approval carries one. A
+   * carrier that names no map publishes a plain string instead, so both shapes
+   * are read here.
+   */
+  readonly displayReason?: string | Readonly<Record<string, string>>
   /** Correlated tool call, when one exists. */
   readonly callId?: string
   /** Whether the carrier can still accept a decision. */
@@ -88,6 +95,15 @@ export interface PendingInteractionLike {
   /** Settle this interaction: an approval outcome or an answer batch. */
   answer?: (value: unknown) => Promise<unknown> | unknown
 }
+
+/**
+ * Resolve one localized text map through the active UI language, following that
+ * language's declared fallback chain. Structurally `ctx.locale.resolveText`.
+ *
+ * It is optional everywhere it is consumed: a composition without the locale
+ * service still renders the map's English entry.
+ */
+export type ResolveTextLike = (text: Readonly<Record<string, string>>) => string
 
 /** One session's entry in the unified status projection (`ctx.uiSession.sessionStatus`). */
 export interface SessionStatusLike {

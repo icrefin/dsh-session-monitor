@@ -53,10 +53,15 @@ describe('stylesheet', () => {
     expect(PANEL_CSS).toMatch(/\.dsm-tool\{[^}]*var\(--dsh-content-font-size-secondary,/)
   })
 
-  it('sizes the session card titles from the global content font setting', () => {
-    expect(PANEL_CSS).toMatch(/\.dsm-cardTitle\{[^}]*font-size:var\(--dsh-content-font-size,/)
-    expect(PANEL_CSS).toMatch(/\.dsm-cardOpen\{[^}]*font-size:var\(--dsh-content-font-size,/)
-    // No narrow-card override may pin the title back to a literal size.
+  it('sizes the session card head from the global content font setting', () => {
+    // One source of truth on the card: the title is the content size plus 4px,
+    // and the head's second line is exactly 1.5x smaller than that title.
+    expect(PANEL_CSS).toMatch(/\.dsm-card\{[^}]*--dsm-card-title-size:calc\(var\(--dsh-content-font-size,/)
+    expect(PANEL_CSS).toMatch(/\.dsm-card\{[^}]*--dsm-card-sub-size:calc\(var\(--dsm-card-title-size\) \/ 1\.5\)/)
+    expect(PANEL_CSS).toMatch(/\.dsm-cardTitle\{[^}]*font-size:var\(--dsm-card-title-size\)/)
+    expect(PANEL_CSS).toMatch(/\.dsm-cardOpen\{[^}]*font-size:var\(--dsm-card-title-size\)/)
+    expect(PANEL_CSS).toMatch(/\.dsm-cardSub\{[^}]*font-size:var\(--dsm-card-sub-size\)/)
+    // No narrow-card override may pin the head back to a literal size.
     expect(PANEL_CSS).not.toMatch(/\.dsm-cardTitle\{font-size:\d/)
   })
 

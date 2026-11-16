@@ -15,6 +15,7 @@ import type {
   ContextPressureLike,
   EventEntryLike,
   PendingInteractionLike,
+  ResolveTextLike,
   SessionListSnapshotLike,
   SessionRowLike,
   SessionStatusLike,
@@ -204,6 +205,42 @@ export function numberField(value: unknown, key: string): number | undefined {
   return typeof read === 'number' && Number.isFinite(read) ? read : undefined
 }
 
+/**
+ * Read one localized presentation text without trusting its shape.
+ *
+ * The Host publishes approval copy as a **map of locale tag → text**
+ * (`{ en, zh, … }`); a plain string is legal too. This function returns a string
+ * in every case, because an object handed to React as a child throws — and one
+ * thrown during render retires the whole panel, leaving a blank page until the
+ * next browser reload.
+ *
+ * @param value - a string, a locale map, or anything else.
+ * @param resolve - the locale service's fallback-chain resolver, when composed.
+ * @returns the text, or `undefined` when the value names none.
+ */
+export function localizedText(value: unknown, resolve?: ResolveTextLike): string | undefined {
+  if (typeof value === 'string') return value.trim() === '' ? undefined : value
+  if (typeof value !== 'object' || value === null) return undefined
+  let map: Record<string, string> | undefined
+  let first: string | undefined
+  for (const [key, entry] of Object.entries(value as Record<string, unknown>)) {
+    if (typeof entry !== 'string' || entry.trim() === '') continue
+    map ??= {}
+    map[key] = entry
+    first ??= entry
+  }
+  if (map === undefined) return undefined
+  if (resolve !== undefined) {
+    try {
+      const resolved = resolve(map)
+      if (typeof resolved === 'string' && resolved.trim() !== '') return resolved
+    } catch (error) {
+      console.warn('[dsh-session-monitor] a localized text could not be resolved', error)
+    }
+  }
+  return map.en ?? first
+}
+
 /** Product labels for the permission presets the harness ships under fixed values. */
 const PERMISSION_LABEL_KEYS: Readonly<Record<string, MonitorKey>> = {
   'read-only': 'permReadOnly',
@@ -255,11 +292,17 @@ export function needsPermissionConfirmation(value: string): boolean {
 
 /**
  * Render a working-directory title fallback: the last two path segments.
- * @param cwd - absolute host path.
+ *
+ * The parameter is deliberately `unknown`: a catalog row's `cwd` is a Host
+ * field, and a value that is not a string (`null` from a serializer, an object
+ * from a plugin-injected row) must read as "no path known" instead of reaching
+ * `.split()` and throwing during render — a throw here blanks the whole page.
+ *
+ * @param cwd - absolute host path, when the producer supplied a string.
  * @returns the short label, or `undefined`.
  */
-export function shortPath(cwd: string | undefined): string | undefined {
-  if (cwd === undefined || cwd === '') return undefined
+export function shortPath(cwd: unknown): string | undefined {
+  if (typeof cwd !== 'string' || cwd === '') return undefined
   const parts = cwd.split('/').filter((part) => part !== '')
   if (parts.length === 0) return cwd
   return parts.slice(-2).join('/')
@@ -267,16 +310,23 @@ export function shortPath(cwd: string | undefined): string | undefined {
 
 /**
  * The card title of one catalog row, never empty.
+ *
+ * Every field is re-read defensively, including `id`: the row type says all of
+ * these are present, but the value comes from the Host, and a title that throws
+ * during render takes the whole panel down with it.
+ *
  * @param row - one catalog row.
  * @returns the display title.
  */
 export function sessionTitle(row: SessionRowLike): string {
-  for (const candidate of [row.title, row.displayTitle]) {
-    if (typeof candidate === 'string' && candidate.trim() !== '') return candidate.trim()
+  for (const key of ['title', 'displayTitle'] as const) {
+    const candidate = textField(row, key)
+    if (candidate !== undefined && candidate.trim() !== '') return candidate.trim()
   }
-  const path = shortPath(row.cwd)
+  const path = shortPath(field(row, 'cwd'))
   if (path !== undefined) return path
-  return row.id.slice(0, 8)
+  const id = textField(row, 'id')
+  return id !== undefined && id !== '' ? id.slice(0, 8) : 'session'
 }
 
 /**
@@ -418,12 +468,16 @@ export function workspaceTitles(
   workspaces: readonly WorkspaceViewLike[] | undefined,
 ): Map<string, string> {
   const titles = new Map<string, string>()
-  if (workspaces === undefined) return titles
+  if (!Array.isArray(workspaces)) return titles
   for (const workspace of workspaces) {
+    if (typeof workspace !== 'object' || workspace === null) continue
     const title = typeof workspace.title === 'string' ? workspace.title.trim() : ''
     const members = workspace.sessionIds
     if (title === '' || !Array.isArray(members)) continue
-    for (const id of members) titles.set(id, title)
+    for (const member of members) {
+      // A member id is a string on the Host; anything else cannot name a Session.
+      if (typeof member === 'string' && member !== '') titles.set(member, title)
+    }
   }
   return titles
 }
@@ -468,9 +522,10 @@ export function defaultWorkspaceId(
   list: SessionListSnapshotLike | undefined,
   remembered: string | undefined,
 ): string | undefined {
-  if (items === undefined || items.length === 0) return undefined
+  if (!Array.isArray(items) || items.length === 0) return undefined
   const known = new Map<string, WorkspaceViewLike>()
   for (const item of items) {
+    if (typeof item !== 'object' || item === null) continue
     const id = item.workspaceId
     if (typeof id === 'string' && id !== '') known.set(id, item)
   }
@@ -561,31 +616,48 @@ export function collectSessions(
   hidden: ReadonlySet<string>,
   options: CollectOptions = {},
 ): MonitoredSession[] {
-  const byId = list?.byId
-  if (byId === undefined) return []
-  const ids = list?.ids ?? Object.keys(byId)
+  const byId: unknown = list?.byId
+  // The snapshot contract says `byId` is a record. A `null` (absent field) or a
+  // primitive from a composition that publishes something else must read as "no
+  // catalog yet": indexing it would throw during render and blank the page.
+  if (typeof byId !== 'object' || byId === null) return []
+  const rows = byId as Readonly<Record<string, unknown>>
+  const ids = Array.isArray(list?.ids) ? list.ids : Object.keys(rows)
   const workspaceBySession = workspaceTitles(options.workspaces)
+  // The status projection is a Map on the Host; a composition that publishes a
+  // different shape simply contributes no status.
+  const lookup = typeof statuses?.get === 'function' ? statuses : undefined
+  const removed = typeof hidden?.has === 'function' ? hidden : undefined
+  const spawned = typeof options.spawned?.has === 'function' ? options.spawned : undefined
 
   const candidates: MonitoredSession[] = []
-  for (const id of ids) {
-    if (hidden.has(id)) continue
-    const row = byId[id]
-    if (row === undefined) continue
-    const blank = row.blank === true
-    if (blank && options.spawned?.has(id) !== true) continue
-    if (row.origin === 'subagent' || row.parentId !== undefined) continue
-    const status = statuses?.get(id)
+  for (const raw of ids) {
+    // A catalog id is a string; anything else can name neither a row nor a card.
+    if (typeof raw !== 'string' || raw === '') continue
+    const id = raw
+    if (removed?.has(id) === true) continue
+    // `byId` is a plain record built on the Host side; a hole or an explicit
+    // `null` must read as "no row", never as a crash inside the grid.
+    const row = rows[id]
+    if (typeof row !== 'object' || row === null) continue
+    const blank = field(row, 'blank') === true
+    if (blank && spawned?.has(id) !== true) continue
+    if (textField(row, 'origin') === 'subagent' || field(row, 'parentId') !== undefined) continue
+    const status = lookup?.get(id)
     const pending = status?.pendingInteraction
-    const running = row.running === true || status?.running === true
+    const running = field(row, 'running') === true || status?.running === true
+    const cwd = textField(row, 'cwd')
+    const untitled = sessionTitle(row as SessionRowLike)
+    const blankTitle = options.blankTitle
     candidates.push({
       id,
-      title: blank ? (options.blankTitle ?? sessionTitle(row)) : sessionTitle(row),
-      cwd: row.cwd,
+      title: blank && typeof blankTitle === 'string' && blankTitle.trim() !== '' ? blankTitle : untitled,
+      cwd,
       workspace:
-        workspaceLabel(workspaceBySession.get(id), options.defaultWorkspaceTitle) ?? shortPath(row.cwd),
+        workspaceLabel(workspaceBySession.get(id), options.defaultWorkspaceTitle) ?? shortPath(cwd),
       running,
       pending,
-      updatedAt: row.updatedAt ?? 0,
+      updatedAt: numberField(row, 'updatedAt') ?? 0,
       state: monitorState(running, pending),
       completionUnread: status?.completionUnread === true,
     })
@@ -929,7 +1001,7 @@ function resultHint(message: unknown): string {
  * @returns transcript rows, oldest first.
  */
 export function deriveTranscript(entries: readonly EventEntryLike[] | undefined): TranscriptRow[] {
-  if (entries === undefined) return []
+  if (!Array.isArray(entries)) return []
   const rows: TranscriptRow[] = []
   /** Tool-call identity → index of its row. */
   const tools = new Map<string, number>()
@@ -1062,10 +1134,10 @@ export const TRANSCRIPT_WINDOW = 60
  * @returns epoch milliseconds, or 0 when the window holds no timed event.
  */
 export function newestEventTime(entries: readonly EventEntryLike[] | undefined): number {
-  if (entries === undefined) return 0
+  if (!Array.isArray(entries)) return 0
   let newest = 0
   for (const entry of entries) {
-    const time = entry.event?.time
+    const time = entry?.event?.time
     if (typeof time === 'number' && Number.isFinite(time) && time > newest) newest = time
   }
   return newest

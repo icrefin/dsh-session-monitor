@@ -214,6 +214,11 @@ answer was accepted.
 - **The Workspace title is the card's second line, in normal text colour.** It comes from the Workspace registry,
   not from the `cwd` string, so a renamed Workspace shows its name; the raw path stays a tooltip. State and time
   follow it in the muted caption colour, and the status dot repeats the state at a glance.
+- **The card head is one step above the transcript, and its two lines are proportional.** The session title is
+  `--dsh-content-font-size` plus 4 px (18 px at the default 14 px), and the Workspace / state / time line under it
+  is exactly **1.5x smaller** than that title (12 px), set once on the card as `--dsm-card-title-size` and
+  `--dsm-card-sub-size`. Both come from the same token, so the Settings → General font-size preference scales the
+  whole head together instead of leaving the second line pinned to a size of its own.
 - **Transcript text is the conversation's text size.** User and assistant rows read `--dsh-content-font-size`
   (14 px by default) with the same line-height delta the Chat uses, and tool/notice rows read
   `--dsh-content-font-size-secondary`; the card therefore follows the Settings → General font-size preference
@@ -244,6 +249,22 @@ answer was accepted.
   only the fallback, so a lagging shared snapshot can never hide live work. Each card reconciles its two snapshots
   every 2 s, and the page asks the Host for a fresh catalog baseline on mount and every 15 s — a missed push costs
   one interval, not a wrong mark.
+- **The panel cannot blank the centre column.** The harness isolates a slot entry with a boundary that
+  **retires** it: one throw during render leaves an empty region until the page is reloaded. The monitor
+  therefore renders behind its own boundary (`Boundaries.tsx`), so a failure stays inside the plugin and shows a
+  readable *Try again* panel that remounts the page; each card has a second boundary, so one unreadable session
+  costs its own cell, not the rest of the grid.
+- **Host copy reaches React as text, never as an object.** An approval publishes `displayReason` as a locale map
+  (`{ en, zh, … }`), not a ready string — every sandbox-escalation request carries one. The map is resolved through
+  the active language (`ctx.locale.resolveText`), with the English entry as the fallback. A map rendered as a child
+  throws "Objects are not valid as a React child" and takes the panel with it; that was the blank-page failure in
+  0.11.3 and earlier.
+- **Nested Cordis services are read reflectively, never through the proxy.** `sessionStatus` is not a
+  member of `uiSession`: it is a service registered as `uiSession.sessionStatus`, and the context proxy
+  throws `cannot get property "uiSession.sessionStatus" without inject` for a plugin that did not declare
+  that exact dotted name. The read used to happen while the page rendered, so every mount of the monitor
+  ended in *This page could not be drawn*. It is now resolved with the reflective `ctx.get()` at mount
+  time (like `remote.permissionPresets`), so a composition without the projection still mounts the panel.
 - **One reference source.** All retention is accounted under the source key
   `sessionMonitor`, so `sessions.retainInfo(id)` distinguishes the monitor's
   streams from the conversation's own.
@@ -251,7 +272,7 @@ answer was accepted.
 ## Verified
 
 - `pnpm check` — typecheck of both halves and the tests, the built bundle, then
-  the test run: **133 tests**, including a jsdom mount of the real page against
+  the test run: **168 tests**, including a jsdom mount of the real page against
   fake projections (ordering, live window, question answer, prompt send, removal,
   open failure, a long answer rendered whole, the new-session control's default
   Workspace, its start call, folder adoption, a cancelled chooser and a refused
@@ -263,10 +284,33 @@ answer was accepted.
   (every rendered class has a rule; no literal colours), and an execution of the
   **built** bundle behind a fake module loader (bundle id, exports, real `apply`
   wiring, no second React).
+- **Robustness** (`test/robustness.spec.tsx`): an approval whose `displayReason`
+  is a locale map renders the resolved sentence — with `ctx.locale.resolveText`
+  and, without it, the map's English entry — and the panel stays mounted; a plain
+  string and a malformed map both render; a throwing card keeps its neighbours;
+  a throwing page renders the *Try again* panel and remounts on click; a page whose
+  pref store throws is contained inside the plugin. A table of malformed
+  projections (non-array catalog `ids`, a `null` catalog row, a `null` status row,
+  junk event-window entries, a `null` permission option, junk model groups, a
+  `null` queued row) all render the page instead of blanking it.
+- **Foreign data at the page level** (`test/foreign-data.spec.tsx`): a matrix of
+  single-field mutations — every catalog, status, Workspace and preference value
+  the page reads, each replaced by `null`, a number, a string, an array, a
+  locale map and a function — mounts the real panel with the toolbar included
+  and asserts the page-level fallback never appears. The paths this closed: a
+  snapshot whose `byId` is `null`, a row with no usable title whose `cwd` is not
+  a string (the title fallback called `.split()`), and a `null` row for an id the
+  page spawned (the prune effect read `.blank`). The fallback also prints the
+  one-line reason it caught, so a recurrence is readable in place.
 - `scripts/dev-profile.sh` — an isolated profile boots the row and serves
   `/plugins/dsh-session-monitor/client.js`.
-- Not verified: the panel's pixels. This session had no browser control, so the
-  visual check (light/dark, card grid at narrow widths) remains for the user.
+- **The panel in a real browser** (2026-11-15, headless Chrome over CDP against an isolated profile
+  seeded with nine real session logs): the sidebar opens the monitor, the page draws its header,
+  toolbar and grid, the cards show their titles and transcripts, and no page boundary, card boundary
+  or console error appears. The same run reproduced the 0.11.5 failure
+  (`cannot get property "uiSession.sessionStatus" without inject`), which pins the fix to that call.
+- Not verified: dark theme and narrow widths in a real browser (the jsdom and layout checks cover the
+  stylesheet contract), the Electron window itself, and the waiting-card answer flow on real streams.
 
 ## Install
 
@@ -288,16 +332,18 @@ imported at the next start.
 ```
 src/index.ts                     host half: identity only, registers nothing
 src/client/index.tsx             sidebar row + main page registration
+src/client/Boundaries.tsx        page- and card-level crash containment
+src/client/MonitorPanel.tsx      registered entry: the bounded page
 src/client/MonitorPage.tsx       grid, toolbar, card selection
 src/client/CardBudgetControl.tsx card-budget stepper (− / number / +)
 src/client/NewSessionControl.tsx new-session button + Workspace drop-down
 src/client/SessionCard.tsx       one card: header, transcript, pending, composer
 src/client/InteractionCard.tsx   question/approval answer block
-src/client/model.ts              which sessions, what happened (pure)
+src/client/model.ts              which sessions, what happened, localized text (pure)
 src/client/store.ts              removed ids + card budget (localStorage)
 src/client/useSessionFeed.ts     retain/follow/release one session
 src/client/styles.ts             theme-token stylesheet
-test/                            model, store, manifest, page (jsdom), built bundle
+test/                            model, store, manifest, page (jsdom), robustness, built bundle
 ```
 
 ## License

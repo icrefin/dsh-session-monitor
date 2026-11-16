@@ -46,6 +46,7 @@ import type {
   PermissionOptionLike,
   QueueActionLike,
   QueueRowLike,
+  ResolveTextLike,
   SessionsServiceLike,
 } from './types.ts'
 import { useSessionFeed } from './useSessionFeed.ts'
@@ -70,6 +71,13 @@ export interface SessionCardProps {
   readonly openSession?: ((sessionId: string) => void) | undefined
   /** Whether the user already looked at this Session's finished run. */
   readonly acknowledged?: boolean | undefined
+  /**
+   * Resolve an approval's localized copy through the active UI language.
+   *
+   * Optional, like every foreign read on this card: without it the approval
+   * block shows the map's English text.
+   */
+  readonly resolveText?: ResolveTextLike | undefined
 }
 
 /** Longest draft kept in a card composer. */
@@ -172,8 +180,8 @@ function refused(result: unknown): boolean {
  * @param t - translate seat.
  * @returns the message text, a clip of it, or the attachment placeholder.
  */
-function queueRawText(row: QueueRowLike): string {
-  const blocks = row.content
+function queueRawText(row: QueueRowLike | null | undefined): string {
+  const blocks = row?.content
   return Array.isArray(blocks)
     ? blocks
         .filter((block) => block?.type === 'text')
@@ -228,6 +236,7 @@ export function SessionCard({
   modelDirectoryFor,
   openSession,
   acknowledged,
+  resolveText,
 }: SessionCardProps): ReactElement {
   const feed = useSessionFeed(sessions, session.id, session.updatedAt)
   const [draft, setDraft] = useState('')
@@ -315,6 +324,7 @@ export function SessionCard({
     if (options === undefined) return result
     const seen = new Set<string>()
     for (const option of options) {
+      if (typeof option !== 'object' || option === null) continue
       const value = option.value
       if (typeof value !== 'string' || value === '' || seen.has(value)) continue
       seen.add(value)
@@ -380,11 +390,14 @@ export function SessionCard({
   }
 
   const modelGroups = useMemo(() => {
-    const groups: { id: string; name: string; models: { id: string; name: string; effort?: string }[] }[] = []
-    for (const group of modelState?.groups ?? []) {
+    const result: { id: string; name: string; models: { id: string; name: string; effort?: string }[] }[] = []
+    const groups = modelState?.groups
+    for (const group of Array.isArray(groups) ? groups : []) {
+      if (typeof group !== 'object' || group === null) continue
       if (typeof group.id !== 'string' || group.id === '') continue
       const models: { id: string; name: string; effort?: string }[] = []
-      for (const model of group.models ?? []) {
+      for (const model of Array.isArray(group.models) ? group.models : []) {
+        if (typeof model !== 'object' || model === null) continue
         if (typeof model.id !== 'string' || model.id === '') continue
         models.push({
           id: model.id,
@@ -392,13 +405,13 @@ export function SessionCard({
           ...(model.reasoning?.defaultEffort === undefined ? {} : { effort: model.reasoning.defaultEffort }),
         })
       }
-      groups.push({
+      result.push({
         id: group.id,
         name: typeof group.name === 'string' && group.name !== '' ? group.name : group.id,
         models,
       })
     }
-    return groups
+    return result
   }, [modelState])
 
   const modelChoices = useMemo(
@@ -473,7 +486,8 @@ export function SessionCard({
     const visible: { id: string; text: string; raw: string }[] = []
     for (const row of rows) {
       if (visible.length >= MAX_QUEUE_ROWS) break
-      const id = row?.id
+      if (typeof row !== 'object' || row === null) continue
+      const id = row.id
       if (typeof id !== 'string' || id === '') continue
       visible.push({ id, text: queueText(row, t), raw: queueRawText(row) })
     }
@@ -680,7 +694,12 @@ export function SessionCard({
 
       <div className="dsm-body" ref={bodyRef} onScroll={onScroll}>
         {pending === undefined ? null : (
-          <InteractionCard key={pending.key ?? 'pending'} interaction={pending} t={t} />
+          <InteractionCard
+            key={pending.key ?? 'pending'}
+            interaction={pending}
+            t={t}
+            resolveText={resolveText}
+          />
         )}
         {rows.length === 0 ? (
           <div className="dsm-hint" data-tone={feed.error ? 'error' : undefined}>

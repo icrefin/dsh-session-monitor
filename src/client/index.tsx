@@ -27,10 +27,11 @@ import type { SlotCore, TranslateNS } from '@deepseek-ai/dsh-client-ui-slots'
 import type {} from '@deepseek-ai/dsh-client-ui-layout/client'
 import type {} from '@deepseek-ai/dsh-client-ui-sidebar/client'
 import { en, zh, type MonitorKey, type MonitorTranslate } from './locales.ts'
-import { MonitorPage } from './MonitorPage.tsx'
+import { MonitorPanel } from './MonitorPanel.tsx'
 import { PanelIcon } from './PanelIcon.tsx'
 import { inject, NS, PANEL_ID, PANEL_ORDER } from './plugin.ts'
 import { resolveRemote } from './remote.ts'
+import { resolveSessionStatus } from './sessionStatus.ts'
 import { MonitorStore } from './store.ts'
 import { injectStyles } from './styles.ts'
 import type {
@@ -59,6 +60,11 @@ declare module '@deepseek-ai/dsh-client-ui-slots' {
 interface LocaleService {
   register(namespace: 'dsh-session-monitor', dictionaries: { en: typeof en; zh: typeof zh }): () => void
   bind(namespace: 'dsh-session-monitor'): TranslateNS<'dsh-session-monitor'>
+  /**
+   * Resolve one localized text map through the active language's fallback
+   * chain. Optional: a composition without it leaves the map's English entry.
+   */
+  resolveText?(text: Readonly<Record<string, string>>): string
 }
 
 /** Structural face of the client slot service. */
@@ -74,16 +80,18 @@ interface SlotsService {
 /**
  * The client root context this plugin uses.
  *
- * `sessions` and `uiSession` are read lazily inside the injection face rather
- * than up front: a failed read there would retire the slot entry silently, and
- * the page already renders a readable state when either projection is missing.
+ * Plain service members (`sessions.list`, `workspaces.list`) are read inside the
+ * injection face; an absent projection costs the page live data, not its mount.
+ * Nested services are never read through this proxy: the current runtime throws
+ * for a dotted name the plugin did not inject, and a render-time throw blanks the
+ * panel. `uiWorkspace`, `remote.permissionPresets` and `uiSession.sessionStatus`
+ * are therefore resolved with the reflective `get()` instead.
  */
 interface ClientContext {
   effect(callback: () => (() => void) | void, label?: string): void
   slots: SlotsService
   locale: LocaleService
   sessions?: SessionsServiceLike
-  uiSession?: UiSessionServiceLike
   workspaces?: WorkspacesServiceLike
   remote?: RemoteServiceLike
   /** Reflective read that bypasses the context proxy's inject check (optional service). */
@@ -124,6 +132,24 @@ export function apply(ctx: ClientContext): void {
     ctx.effect(() => ctx.locale.register(NS, { en, zh }), 'dsh-session-monitor: dictionaries')
     const t = ctx.locale.bind(NS) as MonitorTranslate
     const store = new MonitorStore()
+
+    /**
+     * Resolve a Host-supplied locale map for one card's approval copy.
+     *
+     * The map must never reach React as a child: an earlier release rendered it
+     * directly, and an approval carrying `displayReason` then threw during render
+     * and left the whole panel blank until a browser reload. An empty result lets
+     * the reader fall back to the map's English entry.
+     */
+    const resolveText = (text: Readonly<Record<string, string>>): string => {
+      try {
+        const resolved = ctx.locale.resolveText?.(text)
+        return typeof resolved === 'string' ? resolved : ''
+      } catch (error) {
+        console.warn('[dsh-session-monitor] a localized text could not be resolved', error)
+        return ''
+      }
+    }
 
     // Read the services once, here: the injection face runs inside the renderer
     // and hands its result to a component's dependency arrays, so a fresh proxy
@@ -179,7 +205,6 @@ export function apply(ctx: ClientContext): void {
 
     let services: {
       sessions?: SessionsServiceLike
-      uiSession?: UiSessionServiceLike
       workspaces?: WorkspacesServiceLike
       remote?: RemoteServiceLike
       modelDirectoryFor?: (sessionId: string) => ModelDirectoryLike | undefined
@@ -187,7 +212,6 @@ export function apply(ctx: ClientContext): void {
     try {
       services = {
         sessions: ctx.sessions,
-        uiSession: ctx.uiSession,
         workspaces: ctx.workspaces,
         remote: resolveRemote(ctx),
         modelDirectoryFor,
@@ -195,6 +219,18 @@ export function apply(ctx: ClientContext): void {
     } catch (error) {
       console.warn('[dsh-session-monitor] the Session services could not be read', error)
     }
+
+    /**
+     * The Session status projection, resolved at mount time.
+     *
+     * `uiSession.sessionStatus` is a nested Cordis service: reading it through
+     * the context proxy during render throws on the current runtime unless that
+     * dotted name is in the plugin's `inject` list, and a throw there blanks the
+     * page. It is optional for this panel, so it is read reflectively instead —
+     * the cards then show no live state when a composition lacks it, instead of
+     * the monitor refusing to mount.
+     */
+    const uiSessionFor = (): UiSessionServiceLike | undefined => resolveSessionStatus(ctx)
 
     /**
      * The verbs behind the toolbar's new-session control.
@@ -300,11 +336,13 @@ export function apply(ctx: ClientContext): void {
               inject: () => ({
                 store,
                 ...services,
+                uiSession: uiSessionFor(),
                 openSession: openSessionFor(),
                 newSession: newSessionActionsFor(),
+                resolveText,
               }),
             },
-            MonitorPage,
+            MonitorPanel,
           ),
         ),
       'dsh-session-monitor: main panel',

@@ -179,6 +179,11 @@ Auto review 保留一次就地确认，因为它改变的是每一个请求的�
 - **工作区标题是卡片的第二行，用正文颜色。** 它来自工作区注册表，而不是 `cwd` 字符串，
   所以重命名过的工作区会显示它的名字；原始路径仍作为悬停提示保留。状态和时间紧随其后，
   用弱化的说明文字颜色，状态圆点让人一眼看出状态。
+- **卡片头部比对话正文大一级，两行之间成比例。** 会话标题是 `--dsh-content-font-size`
+  再加 4 px（默认 14 px 时为 18 px），它下面那行工作区 / 状态 / 时间正好**比标题小 1.5 倍**
+  （12 px），只在卡片上定义一次：`--dsm-card-title-size` 与 `--dsm-card-sub-size`。两者出自
+  同一个 token，所以 Settings → General 的字号偏好会把整个头部一起放大，而不会让第二行
+  继续固定在自己的字号上。
 - **对话文本用的是对话本身的字号。** 用户行和助手行读取 `--dsh-content-font-size`
   （默认 14 px），行高增量与 Chat 相同，工具/通知行读取
   `--dsh-content-font-size-secondary`；于是卡片跟随 Settings → General 里的字号偏好，
@@ -204,12 +209,27 @@ Auto review 保留一次就地确认，因为它改变的是每一个请求的�
   滞后的共享快照永远无法掩盖正在发生的工作。每张卡片每 2 s 核对它的两份快照，页面在挂载
   时以及每 15 s 向宿主索取一份新的目录基线——漏掉一次推送的代价是一个间隔，而不是一个
   错误的标记。
+- **面板不会让中间列变空。** 宿主用一道边界隔离 slot 条目，而这道边界会把它**退役**：
+  渲染时抛一次异常，中间区域就一直空着，直到页面重新加载。所以监控面板渲染在自己的边界
+  之后（`Boundaries.tsx`），失败留在插件内部，显示一块可读的 *Try again* 面板并重新挂载
+  页面；每张卡片还有第二道边界，一个读不动的会话只损失自己那一格，不影响网格其余部分。
+- **宿主文案以文本进入 React，绝不作为对象。** 批准请求把 `displayReason` 发布成语言映射
+  （`{ en, zh, … }`），而不是现成的字符串——每个沙箱提权请求都带着一个。映射按当前语言
+  （`ctx.locale.resolveText`）解析，英文条目作回退。把映射当子节点渲染会抛
+  “Objects are not valid as a React child”，并把整个面板一起带走；那就是 0.11.3 及更早
+  版本的空页面故障。
+- **嵌套的 Cordis 服务用反射读取，绝不走代理。** `sessionStatus` 不是 `uiSession` 的成员：
+  它注册为 `uiSession.sessionStatus`，而上下文代理对没有声明这个精确点号名的插件会抛
+  `cannot get property "uiSession.sessionStatus" without inject`。这次读取原本发生在页面
+  渲染期间，所以监控面板每次挂载都停在 *This page could not be drawn*。现在它在挂载时用
+  反射的 `ctx.get()` 解析（与 `remote.permissionPresets` 一样），所以没有这个投影的组合
+  也能挂载面板。
 - **引用来源只有一个。** 所有 retain 都记在 `sessionMonitor` 这个 source key 下，因此
   `sessions.retainInfo(id)` 能把监控面板的流与对话自己的流区分开。
 
 ## 验证结果
 
-- `pnpm check`——两半与测试的类型检查、构建出的 bundle，然后跑测试：**133 个测试**，
+- `pnpm check`——两半与测试的类型检查、构建出的 bundle，然后跑测试：**168 个测试**，
   包括用 jsdom 把真实页面挂到假投影上（排序、实时窗口、问答作答、发送提示词、移除、
   打开失败、长回答完整渲染、新建会话控件的默认工作区、它的启动调用、文件夹接纳、被取消的
   选择器和被拒绝的启动）、新建的空白会话在页面上接替最旧卡片的位置而不跳转、卡片在面板
@@ -217,10 +237,27 @@ Auto review 保留一次就地确认，因为它改变的是每一个请求的�
   每次只加减一张并在 2 和 24 处停住、`pending` 目录不动已存的顺序、一道样式表守卫
   （每个渲染出的 class 都有规则；没有字面颜色），以及在假模块加载器后面执行**构建产物**
   （bundle id、导出、真实的 `apply` 接线、没有第二份 React）。
+- **稳健性**（`test/robustness.spec.tsx`）：`displayReason` 是语言映射的批准请求会渲染出
+  解析后的句子——有 `ctx.locale.resolveText` 时用它，没有时用映射里的英文条目——并且面板
+  保持挂载；纯字符串和畸形映射都能渲染；抛异常的卡片不影响相邻卡片；抛异常的页面渲染
+  *Try again* 面板并在点击后重新挂载；偏好存储抛异常的页面被限制在插件内部。一张畸形投影
+  表（目录 `ids` 不是数组、`null` 目录行、`null` 状态行、垃圾事件窗口条目、`null` 权限选项、
+  垃圾模型分组、`null` 队列行）都渲染出页面，而不是变成空白。
+- **页面级的外部数据**（`test/foreign-data.spec.tsx`）：单字段变更矩阵——页面读取的每个
+  目录、状态、工作区与偏好值，各替换成 `null`、数字、字符串、数组、语言映射与函数——都能
+  带着工具栏挂载真实面板，并断言页面级回退永远不出现。这里补上的路径：`byId` 为 `null`
+  的快照、标题不可用且 `cwd` 不是字符串的行（标题回退调用了 `.split()`），以及页面自己
+  新建的 id 对应 `null` 行（prune 副作用读取了 `.blank`）。回退还会打印它捕获的那行原因，
+  所以再发生时可以就地诊断。
 - `scripts/dev-profile.sh`——一个隔离的 profile 能启动这一行，并伺服
   `/plugins/dsh-session-monitor/client.js`。
-- 未验证：面板的实际像素。本次会话没有浏览器控制，所以视觉检查（浅色/深色、窄宽度下的卡片
-  网格）仍留给用户。
+- **真实浏览器里的面板**（2026-11-15，用无头 Chrome 通过 CDP，对着一个隔离 profile，里面
+  放了九份真实会话日志）：侧边栏能打开监控面板，页面画出头部、工具栏与网格，卡片显示各自
+  的标题和对话记录，没有页面边界、卡片边界或控制台错误。同一次运行还复现了 0.11.5 的故障
+  （`cannot get property "uiSession.sessionStatus" without inject`），这把修复定位在那次
+  调用上。
+- 未验证：真实浏览器里的深色主题和窄宽度（样式表契约由 jsdom 与布局检查覆盖）、Electron
+  窗口本身，以及真实流上等待卡片的作答流程。
 
 ## 安装
 
@@ -242,15 +279,17 @@ scripts/install.sh            # 构建、打包，并打印 tarball 路径
 src/index.ts                     host half: identity only, registers nothing
 src/client/index.tsx             sidebar row + main page registration
 src/client/MonitorPage.tsx       grid, toolbar, card selection
+src/client/Boundaries.tsx        页面级与卡片级的崩溃兜底
+src/client/MonitorPanel.tsx      注册入口：带边界的那一页
 src/client/CardBudgetControl.tsx 卡片预算步进器（− / 数字 / +）
 src/client/NewSessionControl.tsx new-session button + Workspace drop-down
 src/client/SessionCard.tsx       one card: header, transcript, pending, composer
 src/client/InteractionCard.tsx   question/approval answer block
-src/client/model.ts              which sessions, what happened (pure)
+src/client/model.ts              which sessions, what happened, localized text (pure)
 src/client/store.ts              removed ids + card budget (localStorage)
 src/client/useSessionFeed.ts     retain/follow/release one session
 src/client/styles.ts             theme-token stylesheet
-test/                            model, store, manifest, page (jsdom), built bundle
+test/                            model, store, manifest, page (jsdom), robustness, built bundle
 ```
 
 ## 贡献

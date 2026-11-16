@@ -1,7 +1,7 @@
 # Handoff — dsh-session-monitor
 
-**Version:** 0.11.3 · **Runtime:** dsh 0.2.2-rc.3 · **Host:** DeepSeek Harness desktop app
-**Written:** 2026-11-02 · **Updated:** 2026-11-14 (0.11.3: rebuilt for dsh 0.2.2-rc.3; the 0.11.0 card-budget change is unchanged)
+**Version:** 0.11.7 · **Runtime:** dsh 0.2.2-rc.3 · **Host:** DeepSeek Harness web GUI
+**Written:** 2026-11-02 · **Updated:** 2026-11-16 (0.11.7: the card head is one step above the transcript — the session title is the content size plus 4 px (18 px at the default) and the workspace/state/time line under it is exactly 1.5x smaller (12 px), both still reading the global content-font token. 0.11.6: the real "This page could not be drawn" cause — a read of the nested Cordis service `uiSession.sessionStatus` through the context proxy, which the rc.3 runtime rejects during render; it is now resolved reflectively. 0.11.5 closed the page-level foreign-data holes around it and made the fallback print its reason)
 **Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
 
 This document is for the next person (or agent) picking this work up on **another machine**.
@@ -11,12 +11,14 @@ It records what exists, what was verified, what was not, and what to do next.
 
 ## 1. One-paragraph status
 
-The plugin is feature-complete for its stated purpose and passes `pnpm check` (133 tests, both
-halves typechecked, loader bundle built). It is installed into the **desktop profile** on the
-machine where it was written, currently **0.11.0**; a bundle added to a running profile is inert
-until the app restarts, so the panel shows the new build only after a relaunch. The panel has **never been seen in the running GUI**: browser control was unavailable to
-the agent that built it. Layout was checked in a local Vite **component fixture** only. Treat
-in-app visual verification as the first open task.
+The plugin is feature-complete for its stated purpose and passes `pnpm check` (168 tests, both
+halves typechecked, loader bundle built). It is installed into the **web profile** on the machine
+where it was written, currently **0.11.4**. The 0.11.4 fix answers the reported symptom — an
+occasional blank centre column that only a browser reload cleared: an approval carrying a
+`displayReason` locale map was handed to React as a child, the render threw, and the shell retired
+the `main` entry for the rest of the page's life. Copy is now resolved to a string, and a page/card
+boundary keeps any future throw inside the plugin. The panel's pixels still have **never been
+checked by an agent** (no browser control); the user reloads the page to pick up this build.
 
 ---
 
@@ -198,7 +200,7 @@ scripts/install.sh    # packs dist/dsh-session-monitor-0.11.3.tgz (builds first)
 Install into a CLI-managed profile:
 
 ```sh
-dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.11.3.tgz
+dsh plugin --profile <profile> add <abs-path>/dist/dsh-session-monitor-0.11.5.tgz
 # then restart the server for the row to compose
 ```
 
@@ -207,7 +209,7 @@ Install into the **Electron desktop profile** (the CLI refuses it):
 ```sh
 cd ~/.dsh/profiles/desktop
 # back up package.json / pnpm-lock.yaml / cordis.patch.yml first
-pnpm add file:<abs-path>/dist/dsh-session-monitor-0.11.3.tgz
+pnpm add file:<abs-path>/dist/dsh-session-monitor-0.11.5.tgz
 # add "dsh-session-monitor" to "dsh.profile.bundles" in package.json
 # restart the app (a bundle added to a running profile is inert until then)
 ```
@@ -220,11 +222,49 @@ composition and bundle serving without touching a live profile.
 
 ---
 
+## 8a. The 0.11.6 crash: a nested service read through the context proxy
+
+**Symptom.** Opening **Session Monitor** showed, every time, the page-level fallback:
+
+> This page could not be drawn
+> One of the sessions reported something this page could not read. Nothing was changed. Try again, and the page mounts from scratch.
+
+**Root cause (reproduced in a real browser, 2026-11-15).** The console carried one error:
+
+```
+Error: cannot get property "uiSession.sessionStatus" without inject
+    at MonitorPage (…/plugins/??dsh-session-monitor/client.js…)
+```
+
+`uiSession.sessionStatus` is not a member of the `uiSession` service object: it is a **nested Cordis
+service** registered under that dotted name (`packages/client/ui-session-status/src/client/status.ts`).
+The rc.3 context proxy checks every service read against the reading fiber's `inject` list and throws
+when the exact dotted name is absent (`vendor/cordis/src/reflect.ts`, `locate`). `MonitorPage` read
+`uiSession?.sessionStatus` **while rendering**, so the throw reached `PanelErrorBoundary` and the panel
+became a Retry face on every mount. Shipped plugins that read it (ui-conversation, ui-subagent) list
+`'uiSession.sessionStatus'` in their `inject` array. This plugin had only `'uiSession'`, and the need
+for the dotted name arrived with the rc.3 runtime.
+
+**Fix.** `sessionStatus.ts` resolves the projection with the reflective `ctx.get('uiSession.sessionStatus')`
+when the page mounts, exactly as `remote.ts` already did for `remote.permissionPresets`. The plugin does
+not have to require the service, and the page still renders (without live state) when a composition
+lacks it. `test/session-status.spec.ts` covers the resolver and fails if `src/client/index.tsx` ever
+reads `ctx.uiSession` again.
+
+**Why it looked like "a value from a session".** The boundary copy was written for the 0.11.3
+`displayReason` failure; it names sessions because that was the only known cause. The guard error is
+unrelated to any session's data.
+
+**How it was verified.** An isolated profile (`DSH_HOME=/tmp/…`, `dsh --profile … web --port 19499`)
+with this bundle installed and **three real sessions copied into its session store**, driven with
+headless Chrome over CDP: 0.11.5 reproduced the fallback above, 0.11.6 draws the panel (grid cards,
+toolbar, no page error). That is the first real-browser check of the panel since 0.9.0.
+
 ## 9. Verification: what was and was not proven
 
 Proven:
 
-- `pnpm check`: 133 tests — model (selection, budget floor/ceiling, the shrink re-seed, transcript, live chunks, whole long messages, grid fit, timestamps,
+- `pnpm check`: 168 tests — model (selection, budget floor/ceiling, the shrink re-seed, transcript, live chunks, whole long messages, grid fit, timestamps, localized approval copy,
   Workspace label/default rules, stable replacement with the displaced card kept at the order tail),
   store (persistence incl. the remembered new-session Workspace and the spawned-blank set,
   clamping, notification), manifest (three ids, activation order, version chip),
@@ -236,6 +276,20 @@ Proven:
   moving one card per click and clamping at 2 and 24, and a smaller budget re-seeding the grid
   to the newest sessions), and the **built** bundle
   behind a fake loader (loader id, exports, real `apply`, no second React).
+- **Foreign page data** (`test/foreign-data.spec.tsx`, 5 tests): a matrix of single-field mutations
+  (every catalog row field, the catalog `ids`/`byId`/`phase`, every status field, every Workspace
+  field, every stored preference, each replaced by `null`, `NaN`, a number, an empty string, an
+  object, an array, a locale map and a function) mounts the real panel with the toolbar's
+  new-session control and asserts the page-level fallback never appears. This is the regression
+  guarantee for the "This page could not be drawn" report: the three paths it closed are a `null`
+  snapshot `byId`, a row with no usable title whose `cwd` is not a string, and a `null` row behind
+  an id in the local `spawned` set.
+- **Robustness** (`test/robustness.spec.tsx`, 17 tests): an approval whose `displayReason` is a
+  locale map renders the resolved sentence (and, with no resolver, the map's English entry) instead
+  of throwing; a throwing card leaves its neighbours mounted; a throwing page shows the *Try again*
+  panel and remounts on click; a page whose pref store throws is contained inside the plugin; and a
+  table of malformed projections (non-array catalog `ids`, `null` catalog/status rows, junk event
+  entries, `null` permission options, junk model groups, `null` queued rows) all still render the page.
 - An isolated dsh profile composed the row and served
   `/plugins/??dsh-session-monitor/client.js&rev=…` with HTTP 200.
 - **The panel in a real browser** (headless Chrome driven over CDP against the isolated profile on
@@ -249,8 +303,12 @@ Proven:
   9 cards fit 1180×760. Screenshots live in `reports/` (gitignored, not committed).
 
 **Not proven:** the panel inside the Electron window itself, real fonts/DPI, light/dark on the
-desktop build, real session streams on the cards, and the waiting-card interactions. The browser
-check ran the web app in Chrome, which is the same client bundle but not the desktop shell.
+desktop build, narrow-width layouts, and the waiting-card answer flow against a live stream. The
+browser check ran the web app in Chrome, which is the same client bundle but not the desktop shell.
+
+**Redone for 0.11.6 (web app in headless Chrome, real sessions):** the panel draws, and the same
+environment reproduced the pre-fix failure with its exact error line. Screenshot kept in
+`reports/after-0.11.6-monitor.png` (gitignored).
 
 ---
 
@@ -283,6 +341,25 @@ check ran the web app in Chrome, which is the same client bundle but not the des
 10. **Cards carry `data-session-id`.** Use it to tell duplicate-looking cards apart in DevTools.
 11. **`lib/`, `dist/`, `reports/`, `node_modules/`, `.dev-home/` are gitignored.** A fresh clone must
    build; it cannot install a tarball that is not there.
+12. **Never index or read a Host field without a type check.** `collectSessions`, `sessionTitle`
+    and `shortPath` are total over `unknown` on purpose: a `null` `byId`, a non-string `cwd`, a
+    non-string id or a `null` row must read as "nothing known". A throw above the cards reaches
+    `PanelErrorBoundary` and costs the whole grid, not one cell. `test/foreign-data.spec.tsx` fails
+    if any of those guards is removed.
+13. **Never render a foreign value as a child.** The Host publishes approval copy as a locale map
+    (`displayReason: { en, zh, … }`); rendering it directly throws "Objects are not valid as a React
+    child". Resolve it with `localizedText()`/`ctx.locale.resolveText` (0.11.4). The same rule applies
+    to any new field read from a projection: check `typeof === 'string'` first, or it reaches React.
+14. **Never read a nested Cordis service through the context proxy.** `ctx.uiSession.sessionStatus`,
+    `ctx.remote.permissionPresets` and friends are separate services under a dotted name. The runtime
+    rejects the read unless that exact name is in `inject`, and a render-time throw blanks the panel;
+    when the capability is optional, use the reflective `ctx.get(name)` at mount time (`sessionStatus.ts`,
+    `remote.ts`). `test/session-status.spec.ts` guards the `uiSession` case.
+15. **The shell retires a crashed slot entry; it does not retry it.** A throw from the page — render
+    or effect — is reported to the slot registry, the `main` entry abdicates, and the centre column
+    keeps an empty crash face until the page reloads. That is why `MonitorPanel` registers the page
+    behind `PanelErrorBoundary` and every card sits in `CardErrorBoundary`: the shell's boundary must
+    never see a monitor failure. Do not register `MonitorPage` directly.
 
 ---
 
@@ -378,3 +455,7 @@ Remember: a fixture screenshot proves layout, **not** app behaviour.
 | 0.9.1 | The frozen order is stored with the preferences: a panel switch or app restart resumes the same cells, a `pending` catalog never re-seeds it, and a smaller budget only hides the order's tail instead of re-ranking |
 | 0.10.0 | The toolbar's card-budget select becomes a stepper: one card per increment, an editable number between 2 and 24, and the stored/clamped range widened from 1–16 to 2–24 |
 | 0.11.0 | Lowering the card budget re-seeds the grid to the newest sessions, newest-first; raising it keeps that order. This intentionally reverses the 0.9.1 rule that a smaller budget only hides the order's tail |
+| 0.11.4 | An approval's `displayReason` locale map is resolved to text through `ctx.locale.resolveText` (English entry as fallback), so a sandbox-escalation approval no longer throws during render; the page and each card render behind their own error boundary with a Retry action, so a throw cannot blank the centre column until a reload |
+| 0.11.7 | The card head is larger and proportional: the session title is the content font size plus 4px (18px at the 14px default), and the workspace / state / time line below it is exactly 1.5x smaller than that title (12px) instead of a fixed 10px, both still derived from `--dsh-content-font-size` so Settings -> General scales them together |
+| 0.11.6 | The nested Cordis service `uiSession.sessionStatus` is resolved reflectively at mount instead of being read through the context proxy during render — the rc.3 runtime throws `cannot get property "uiSession.sessionStatus" without inject`, which put every mount of the page behind the Retry fallback |
+| 0.11.5 | The page reads every foreign value defensively: a `null` catalog `byId`, a row whose `cwd` is not a string (the title fallback called `.split()`), a `null` row behind a spawned id (the prune effect read `.blank`), non-string catalog ids and Workspace members all read as "nothing known" instead of throwing; the page/card fallbacks print the one-line error they caught, so a recurrence is diagnosable in place |

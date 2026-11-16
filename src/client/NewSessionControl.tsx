@@ -77,7 +77,12 @@ export function NewSessionControl({
   const [error, setError] = useState<string | undefined>(undefined)
 
   const labels = new Map<string, string>()
-  for (const workspace of workspaces) {
+  /** The selectable rows: a malformed registry entry is left out, never drawn. */
+  const choices = workspaces.filter(
+    (workspace): workspace is WorkspaceViewLike =>
+      typeof workspace === 'object' && workspace !== null,
+  )
+  for (const workspace of choices) {
     const id = workspace.workspaceId
     if (typeof id !== 'string' || id === '') continue
     labels.set(
@@ -200,11 +205,18 @@ export function NewSessionControl({
             {t('noWorkspace')}
           </option>
         ) : null}
-        {workspaces.map((workspace) => (
-          <option key={workspace.workspaceId} value={workspace.workspaceId} title={workspace.path}>
-            {labels.get(workspace.workspaceId ?? '') ?? workspace.workspaceId}
-          </option>
-        ))}
+        {choices.map((workspace) => {
+          const id = workspace.workspaceId
+          if (typeof id !== 'string' || id === '') return null
+          // The row's `path` is a Host field: a non-string must not become an
+          // attribute value, and the label already tolerates a missing one.
+          const path = typeof workspace.path === 'string' ? workspace.path : undefined
+          return (
+            <option key={id} value={id} title={path}>
+              {labels.get(id) ?? id}
+            </option>
+          )
+        })}
         {canPick ? <option value={CHOOSE_FOLDER}>{t('pickFolder')}</option> : null}
       </select>
       {status === undefined ? null : (

@@ -103,7 +103,10 @@ describe.skipIf(!built)('built client bundle', () => {
         },
       },
       sessions: { list },
+      // The status projection is a nested service: the page receives it only
+      // through the reflective read, never as a member of this context.
       uiSession: { sessionStatus: status },
+      get: (name: string) => (name === 'uiSession.sessionStatus' ? status : undefined),
     }
 
     // The real apply must survive a mounted shell; a throw here fails the page boot.
@@ -124,7 +127,8 @@ describe.skipIf(!built)('built client bundle', () => {
     expect(typeof injectFace).toBe('function')
     const face = injectFace?.()
     expect(face?.sessions).toBe(fake.sessions)
-    expect(face?.uiSession).toBe(fake.uiSession)
+    // Read reflectively: the page gets the service instance, not `ctx.uiSession`.
+    expect((face?.uiSession as { sessionStatus?: unknown } | undefined)?.sessionStatus).toBe(status)
     expect(typeof (face?.store as { getSnapshot?: unknown }).getSnapshot).toBe('function')
 
     // Every registration is effect-scoped, so unloading the plugin disposes it.

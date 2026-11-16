@@ -60,6 +60,20 @@ export const en = {
   emptyTitle: 'No sessions to monitor',
   /** Empty state body. */
   emptyBody: 'Start a session, or restore the sessions you removed from this grid.',
+  /** Page-level boundary: the panel stopped drawing. */
+  panelFailed: 'This page could not be drawn',
+  /** Page-level boundary: what happened, in plain words. */
+  panelFailedBody:
+    'One of the sessions reported something this page could not read. Nothing was changed. Try again, and the page mounts from scratch.',
+  /** Page-level boundary: remount the page. */
+  panelRetry: 'Try again',
+  /** Card boundary: one card stopped drawing. */
+  cardFailed: 'This card could not be drawn',
+  /** Card boundary: the session itself is unaffected. */
+  cardFailedBody:
+    'This session reported something this card could not read. The session keeps running; only its card is affected.',
+  /** Card boundary: remount the card. */
+  cardRetry: 'Try again',
   /** Card state: blocked on the user. */
   waiting: 'waiting for you',
   /** Card state: a turn is running. */
@@ -231,6 +245,13 @@ export const zh: typeof en = {
   defaultWorkspace: '默认工作区',
   emptyTitle: '没有可监视的会话',
   emptyBody: '开始一个新会话，或恢复从这个网格中移除的会话。',
+  panelFailed: '这个页面无法显示',
+  panelFailedBody:
+    '有会话返回了这个页面无法读取的内容。没有做任何修改。请重试，页面会重新加载。',
+  panelRetry: '重试',
+  cardFailed: '这张卡片无法显示',
+  cardFailedBody: '这个会话返回了这张卡片无法读取的内容。会话本身不受影响。',
+  cardRetry: '重试',
   waiting: '等待你回答',
   working: '运行中',
   completed: '已完成',

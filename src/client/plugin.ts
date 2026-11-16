@@ -31,5 +31,13 @@ export const PANEL_ORDER = 5
 /** Reference-source key this plugin's retention is accounted under. */
 export const REFERENCE_SOURCE = 'sessionMonitor'
 
-/** Services the two registrations require before the bundle activates. */
+/**
+ * Services the two registrations require before the bundle activates.
+ *
+ * `uiSession` is the parent namespace of the status projection, listed to order
+ * activation with the sessions UI; the nested `uiSession.sessionStatus` service
+ * itself is optional and read reflectively (see `sessionStatus.ts`) — reading it
+ * through the context proxy without injecting that exact dotted name throws on
+ * the current runtime, and that throw blanks the page.
+ */
 export const inject = ['slots', 'locale', 'sessions', 'uiSession', 'workspaces', 'remote']

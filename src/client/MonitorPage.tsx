@@ -24,6 +24,7 @@ import {
 } from './model.ts'
 import type { MonitorStore } from './store.ts'
 import type { MonitorPrefs } from './store.ts'
+import { CardErrorBoundary } from './Boundaries.tsx'
 import { CardBudgetControl } from './CardBudgetControl.tsx'
 import { NewSessionControl } from './NewSessionControl.tsx'
 import { SessionCard } from './SessionCard.tsx'
@@ -32,10 +33,12 @@ import type {
   NewSessionActionsLike,
   ObservableSnapshotLike,
   RemoteServiceLike,
+  ResolveTextLike,
   SessionListSnapshotLike,
   SessionStatusLike,
   SessionsServiceLike,
   UiSessionServiceLike,
+  WorkspaceViewLike,
   WorkspacesServiceLike,
   WorkspacesSnapshotLike,
 } from './types.ts'
@@ -66,10 +69,25 @@ export interface MonitorPageProps {
    * new-session control.
    */
   readonly newSession?: NewSessionActionsLike | undefined
+  /**
+   * Resolve an approval's localized copy through the active UI language.
+   *
+   * Optional: the cards then show the copy's English entry. Either way the text
+   * reaches React as a string — a locale map rendered as a child throws.
+   */
+  readonly resolveText?: ResolveTextLike | undefined
 }
 
 /** Explicit cards-per-row choices; `0` (Auto) is offered separately. */
 const COLUMN_CHOICES = [2, 3, 4, 5, MAX_COLUMNS]
+
+/**
+ * Stable empty Workspace list.
+ *
+ * A fresh `[]` per render would change the candidates memo's dependency every
+ * frame; one shared frozen array keeps an absent registry cheap.
+ */
+const NO_WORKSPACES: readonly WorkspaceViewLike[] = []
 
 /**
  * Subscribe to one optional observable without trusting it.
@@ -149,6 +167,7 @@ export function MonitorPage({
   modelDirectoryFor,
   openSession,
   newSession,
+  resolveText,
 }: MonitorPageProps): ReactElement {
   const list = useServiceSnapshot<SessionListSnapshotLike>(sessions?.list)
   const statuses = useServiceSnapshot<ReadonlyMap<string, SessionStatusLike>>(uiSession?.sessionStatus)
@@ -193,17 +212,18 @@ export function MonitorPage({
   }, [sessions])
 
   /** Every session eligible for a card, before the display order is applied. */
+  const workspaceItems = Array.isArray(workspaceSnapshot?.items) ? workspaceSnapshot.items : NO_WORKSPACES
   const defaultWorkspaceTitle = t('defaultWorkspace')
   const blankTitle = t('newSession')
   const candidates = useMemo(
     () =>
       collectSessions(list, statuses, prefs.hidden, {
-        workspaces: workspaceSnapshot?.items,
+        workspaces: workspaceItems,
         defaultWorkspaceTitle,
         spawned: prefs.spawned,
         blankTitle,
       }),
-    [list, statuses, prefs.hidden, prefs.spawned, workspaceSnapshot, defaultWorkspaceTitle, blankTitle],
+    [list, statuses, prefs.hidden, prefs.spawned, workspaceItems, defaultWorkspaceTitle, blankTitle],
   )
 
   /**
@@ -273,8 +293,12 @@ export function MonitorPage({
   // gives it a title; the card itself stays where it is.
   useEffect(() => {
     for (const id of prefs.spawned) {
-      const row = list?.byId?.[id]
-      if (row !== undefined && row.blank !== true) store.forgetSpawned(id)
+      const row: unknown = list?.byId?.[id]
+      // A `null` row is a catalog hole, not a titled session: reading `.blank`
+      // off it would throw from this effect and blank the page.
+      if (typeof row === 'object' && row !== null && (row as { blank?: unknown }).blank !== true) {
+        store.forgetSpawned(id)
+      }
     }
   }, [list, prefs.spawned, store])
 
@@ -293,7 +317,7 @@ export function MonitorPage({
 
   // The remembered Workspace wins while it exists; otherwise the most recently
   // used one, so the toolbar's choice matches what the sidebar would start in.
-  const newWorkspaceId = defaultWorkspaceId(workspaceSnapshot?.items, list, prefs.newWorkspaceId)
+  const newWorkspaceId = defaultWorkspaceId(workspaceItems, list, prefs.newWorkspaceId)
 
   // The grid is a fixed page: every card must be visible without scrolling the
   // panel, so the column count and the row count are derived from the box the
@@ -340,7 +364,7 @@ export function MonitorPage({
           {newSession === undefined ? null : (
             <NewSessionControl
               t={t}
-              workspaces={workspaceSnapshot?.items ?? []}
+              workspaces={workspaceItems}
               selectedId={newWorkspaceId}
               actions={newSession}
               onSelect={(workspaceId) => store.setNewWorkspace(workspaceId)}
@@ -395,18 +419,20 @@ export function MonitorPage({
         ) : (
           <div className="dsm-grid" ref={gridRef} style={gridStyle}>
             {monitored.map((entry) => (
-              <SessionCard
-                key={entry.id}
-                session={entry}
-                sessions={sessions}
-                store={store}
-                t={t}
-                now={now}
-                permissionCatalog={permissionCatalog}
-                modelDirectoryFor={modelDirectoryFor}
-                openSession={openSession}
-                acknowledged={prefs.acknowledged.has(entry.id)}
-              />
+              <CardErrorBoundary key={entry.id} t={t} title={entry.title}>
+                <SessionCard
+                  session={entry}
+                  sessions={sessions}
+                  store={store}
+                  t={t}
+                  now={now}
+                  permissionCatalog={permissionCatalog}
+                  modelDirectoryFor={modelDirectoryFor}
+                  openSession={openSession}
+                  acknowledged={prefs.acknowledged.has(entry.id)}
+                  resolveText={resolveText}
+                />
+              </CardErrorBoundary>
             ))}
           </div>
         )}
