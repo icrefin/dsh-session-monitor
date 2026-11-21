@@ -34,6 +34,7 @@ import { resolveRemote } from './remote.ts'
 import { resolveSessionStatus } from './sessionStatus.ts'
 import { MonitorStore } from './store.ts'
 import { injectStyles } from './styles.ts'
+import { expandWorkspaceGroup, workspaceIdForSession } from './workspaceReveal.ts'
 import type {
   DirectoryPickerLike,
   ModelDirectoriesServiceLike,
@@ -170,30 +171,6 @@ export function apply(ctx: ClientContext): void {
     } catch (error) {
       console.warn('[dsh-session-monitor] the model directory service could not be watched', error)
     }
-    /**
-     * Navigation and Session creation live in the optional `uiWorkspace`
-     * service, read reflectively because this bundle does not require it: a
-     * composition without it still mounts the panel, the card titles are simply
-     * not links there, and the toolbar renders no new-session control. The read
-     * happens when the page mounts (inside the injection face), after every
-     * service in the Web composition has registered.
-     */
-    const openSessionFor = (): ((sessionId: string) => void) | undefined => {
-      const uiWorkspace = readService<UiWorkspaceServiceLike>(
-        ctx,
-        'uiWorkspace',
-        'the workspace navigation service',
-      )
-      if (uiWorkspace?.openSession === undefined) return undefined
-      return (sessionId: string) => {
-        try {
-          uiWorkspace.openSession?.(sessionId)
-        } catch (error) {
-          console.warn(`[dsh-session-monitor] session ${sessionId} could not be opened`, error)
-        }
-      }
-    }
-
     const modelDirectoryFor = (sessionId: string): ModelDirectoryLike | undefined => {
       try {
         return modelDirectories?.directoryFor?.(sessionId)
@@ -218,6 +195,60 @@ export function apply(ctx: ClientContext): void {
       }
     } catch (error) {
       console.warn('[dsh-session-monitor] the Session services could not be read', error)
+    }
+
+    /**
+     * Open the folded Workspace group that holds one Session, so the row the
+     * title just navigated to is actually visible in the sidebar.
+     *
+     * The ownership read happens on click, not at mount: the Workspace
+     * projection and the Session catalog both settle later, and a card can
+     * outlive either. Absence of the services, the Workspace row, or a sidebar
+     * that is not mounted is not an error — the title still opens the Session.
+     * @param sessionId - the Session whose group should open.
+     */
+    const revealWorkspaceFor = (sessionId: string): void => {
+      try {
+        const workspaces = services.workspaces?.list?.getSnapshot?.()?.items
+        const cwd = services.sessions?.list?.getSnapshot?.()?.byId?.[sessionId]?.cwd
+        const workspaceId = workspaceIdForSession(sessionId, workspaces, cwd)
+        if (workspaceId === undefined) return
+        expandWorkspaceGroup(workspaceId)
+      } catch (error) {
+        console.warn(
+          `[dsh-session-monitor] the Workspace of session ${sessionId} could not be expanded`,
+          error,
+        )
+      }
+    }
+
+    /**
+     * Navigation and Session creation live in the optional `uiWorkspace`
+     * service, read reflectively because this bundle does not require it: a
+     * composition without it still mounts the panel, the card titles are simply
+     * not links there, and the toolbar renders no new-session control. The read
+     * happens when the page mounts (inside the injection face), after every
+     * service in the Web composition has registered.
+     */
+    const openSessionFor = (): ((sessionId: string) => void) | undefined => {
+      const uiWorkspace = readService<UiWorkspaceServiceLike>(
+        ctx,
+        'uiWorkspace',
+        'the workspace navigation service',
+      )
+      if (uiWorkspace?.openSession === undefined) return undefined
+      return (sessionId: string) => {
+        // Expand the Session's Workspace *before* the navigation re-renders the
+        // sidebar: the row addressed here is the one currently mounted, and the
+        // host's own auto-expand only fires for a group with no explicit
+        // expansion entry (see workspaceReveal.ts).
+        revealWorkspaceFor(sessionId)
+        try {
+          uiWorkspace.openSession?.(sessionId)
+        } catch (error) {
+          console.warn(`[dsh-session-monitor] session ${sessionId} could not be opened`, error)
+        }
+      }
     }
 
     /**

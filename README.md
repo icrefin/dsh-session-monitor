@@ -27,8 +27,10 @@ Each card carries, for a session you are **not** viewing:
 - **a Stop button** while the session runs, which stops the turn through the
   session's own `cancel()`;
 - **a clickable title**: clicking a card's title opens that session in the
-  conversation view (`ctx.uiWorkspace.openSession(id)`); a composition without
-  the navigation service keeps the title as a plain heading;
+  conversation view (`ctx.uiWorkspace.openSession(id)`) **and unfolds the
+  Workspace group that holds it in the sidebar**, so its row is visible there
+  too instead of staying hidden behind a group you had folded; a composition
+  without the navigation service keeps the title as a plain heading;
 - **a completion reminder**: a session whose run ended unread draws a green dot
   and a `done` label; clicking anywhere on the card clears it back to the grey
   idle dot, and the next run lights it again;
