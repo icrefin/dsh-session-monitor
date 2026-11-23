@@ -15,7 +15,8 @@ export const en = {
   /** Page title. */
   title: 'Session Monitor',
   /** Page introduction. */
-  description: 'Every active and recently used session on one grid: live transcript, pending questions, and a composer inside each card.',
+  description:
+    'Every active and recently used session on one grid: a live transcript or the session flow, pending questions, and a composer inside each card.',
   /** Toolbar: how many cards the grid shows. */
   shown: '{count} shown',
   /** Toolbar: waiting-session count. */
@@ -32,6 +33,104 @@ export const en = {
   columns: 'Per row',
   /** Toolbar: automatic grid filling. */
   auto: 'Auto',
+  /** Toolbar: accessible name of the view switch. */
+  viewMode: 'View mode',
+  /** Toolbar: the transcript view. */
+  viewCards: 'Transcript',
+  /** Toolbar: the flow view. */
+  viewFlow: 'Flow',
+  /** Flow: status pill, a turn is running. */
+  flowStatusRunning: 'Running',
+  /** Flow: status pill, the session is blocked on the user. */
+  flowStatusWaiting: 'Waiting for you',
+  /** Flow: status pill, the turn finished. */
+  flowStatusDone: 'Turn complete',
+  /** Flow: status pill, the turn ended with an error. */
+  flowStatusFailed: 'Turn failed',
+  /** Flow: status pill, no turn is running. */
+  flowStatusIdle: 'Idle',
+  /** Flow: which turn the header describes. */
+  flowTurnLabel: 'Turn {turn}',
+  /** Flow: elapsed time of the current turn. */
+  flowElapsedLabel: 'Elapsed {time}',
+  /** Flow: accessible name of the step rail. */
+  flowRailLabel: 'This turn: {done} of {total} steps done',
+  /** Flow: steps of the current turn that finished. */
+  flowDoneCount: '{count} done',
+  /** Flow: steps of the current turn that run. */
+  flowRunningCount: '{count} running',
+  /** Flow: steps that failed. */
+  flowFailedCount: '{count} failed',
+  /** Flow: the numbered label, read by a screen reader. */
+  flowStepNumberLabel: 'Step {label}',
+  /** Flow: heading above the numbered list. */
+  flowSessionHeading: 'Session',
+  /** Flow: prompt row tag. */
+  flowPromptTag: 'You',
+  /** Flow: rows dropped from the front of the list. */
+  flowOmitted: '+{count} earlier',
+  /** Flow: activity card while the model is producing text. */
+  flowActivityThinking: 'Thinking',
+  /** Flow: activity card while a tool call runs. */
+  flowActivityTool: 'Running {tool}',
+  /** Flow: activity card while an approval is pending. */
+  flowActivityApproval: 'Waiting for your approval',
+  /** Flow: activity card while a question is pending. */
+  flowActivityQuestion: 'Waiting for your answer',
+  /** Flow: activity card after a turn finished. */
+  flowActivityDone: 'This turn is complete',
+  /** Flow: activity card while nothing runs. */
+  flowActivityIdle: 'Waiting for your next message',
+  /** Flow: step title, the step wrote a file. */
+  flowStepWriting: 'Writing {name}',
+  /** Flow: step title, the step changed a file. */
+  flowStepEditing: 'Editing {name}',
+  /** Flow: step title, the step wrote more than one file. */
+  flowStepWritingMore: 'Writing {name} +{count} more',
+  /** Flow: step title, the step changed more than one file. */
+  flowStepEditingMore: 'Editing {name} +{count} more',
+  /** Flow: the command runs tests. */
+  flowBashPurposeTests: 'running tests',
+  /** Flow: the command installs dependencies. */
+  flowBashPurposeInstall: 'installing dependencies',
+  /** Flow: the command builds the project. */
+  flowBashPurposeBuild: 'building the project',
+  /** Flow: the command searches code or files. */
+  flowBashPurposeSearch: 'searching the code',
+  /** Flow: the command is a git operation. */
+  flowBashPurposeGit: 'working with git',
+  /** Flow: the command uses the network. */
+  flowBashPurposeNetwork: 'using the network',
+  /** Flow: the command inspects or changes files. */
+  flowBashPurposeFiles: 'inspecting or changing files',
+  /** Flow: the command inspects processes or system state. */
+  flowBashPurposeProcesses: 'checking system processes',
+  /** Flow: the command runs a script or interpreter. */
+  flowBashPurposeScript: 'running a script',
+  /** Flow: the command works with a package manager. */
+  flowBashPurposePackages: 'managing packages',
+  /** Flow: no specific intent could be guessed. */
+  flowBashPurposeGeneric: 'running a command',
+  /** Flow: fallback title for a step nothing else describes. */
+  flowStepWork: 'Working',
+  /** Flow: empty state, the session has no prompt yet. */
+  flowEmptyTitle: 'No activity yet',
+  /** Flow: empty state hint. */
+  flowEmptyHint: 'Start a turn and its steps appear here.',
+  /** Flow: the binding is still opening the event log. */
+  flowOpeningHistory: 'Opening the session…',
+  /** Flow: the event log could not be read. */
+  flowHistoryFailed: 'The session history could not be read.',
+  /** Flow: error line above a failed turn's message. */
+  flowErrorLine: 'The turn stopped with an error',
+  /** Flow: how many human prompts the session holds. */
+  flowPromptsCount: '{count} prompts',
+  /** Flow: the single-prompt case. */
+  flowPromptsCountOne: '1 prompt',
+  /** Flow: how many steps the session holds. */
+  flowStepsCount: '{count} steps',
+  /** Flow: the single-step case. */
+  flowStepsCountOne: '1 step',
   /** Toolbar: restore every removed session. */
   restoreAll: 'Restore removed ({count})',
   /** Toolbar: nothing to restore. */
@@ -222,7 +321,7 @@ export const en = {
 export const zh: typeof en = {
   panel: '会话监视器',
   title: '会话监视器',
-  description: '把每个活跃和最近使用的会话放在一张网格里：实时记录、待回答的问题，以及每张卡片自带的输入框。',
+  description: '把每个活跃和最近使用的会话放在一张网格里：实时记录或会话流程、待回答的问题，以及每张卡片自带的输入框。',
   shown: '显示 {count} 个',
   waitingCount: '{count} 个待回答',
   runningCount: '{count} 个运行中',
@@ -231,6 +330,55 @@ export const zh: typeof en = {
   moreCards: '增加一张卡片',
   columns: '每行',
   auto: '自动',
+  viewMode: '视图模式',
+  viewCards: '记录',
+  viewFlow: '流程',
+  flowStatusRunning: '运行中',
+  flowStatusWaiting: '等待你处理',
+  flowStatusDone: '回合完成',
+  flowStatusFailed: '回合失败',
+  flowStatusIdle: '空闲',
+  flowTurnLabel: '第 {turn} 回合',
+  flowElapsedLabel: '已用 {time}',
+  flowRailLabel: '本回合：{total} 步中已完成 {done} 步',
+  flowDoneCount: '完成 {count}',
+  flowRunningCount: '运行 {count}',
+  flowFailedCount: '失败 {count}',
+  flowStepNumberLabel: '步骤 {label}',
+  flowSessionHeading: '整个会话',
+  flowPromptTag: '你',
+  flowOmitted: '另有 {count} 项更早',
+  flowActivityThinking: '思考中',
+  flowActivityTool: '正在运行 {tool}',
+  flowActivityApproval: '等待你的授权',
+  flowActivityQuestion: '等待你的回答',
+  flowActivityDone: '这个回合已完成',
+  flowActivityIdle: '等待你的下一条消息',
+  flowStepWriting: '写入 {name}',
+  flowStepEditing: '修改 {name}',
+  flowStepWritingMore: '写入 {name} 等 {count} 个文件',
+  flowStepEditingMore: '修改 {name} 等 {count} 个文件',
+  flowBashPurposeTests: '运行测试',
+  flowBashPurposeInstall: '安装依赖',
+  flowBashPurposeBuild: '构建项目',
+  flowBashPurposeSearch: '搜索代码',
+  flowBashPurposeGit: '执行 Git 操作',
+  flowBashPurposeNetwork: '访问网络',
+  flowBashPurposeFiles: '查看或修改文件',
+  flowBashPurposeProcesses: '检查系统进程',
+  flowBashPurposeScript: '运行脚本',
+  flowBashPurposePackages: '管理依赖包',
+  flowBashPurposeGeneric: '执行命令',
+  flowStepWork: '工作中',
+  flowEmptyTitle: '还没有活动',
+  flowEmptyHint: '开始一个回合后，它的步骤会显示在这里。',
+  flowOpeningHistory: '正在打开会话…',
+  flowHistoryFailed: '无法读取会话历史。',
+  flowErrorLine: '回合因错误而停止',
+  flowPromptsCount: '{count} 个提示',
+  flowPromptsCountOne: '1 个提示',
+  flowStepsCount: '{count} 步',
+  flowStepsCountOne: '1 步',
   restoreAll: '恢复已移除（{count}）',
   restoreNone: '没有已移除的会话',
   newSession: '新会话',

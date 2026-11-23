@@ -1,5 +1,15 @@
 # dsh-session-monitor
 
+**English** | [简体中文](README.zh-CN.md)
+
+[![License](https://img.shields.io/github/license/icrefin/dsh-session-monitor?style=flat-square)](LICENSE)
+[![Release](https://img.shields.io/github/v/release/icrefin/dsh-session-monitor?style=flat-square)](https://github.com/icrefin/dsh-session-monitor/releases)
+[![CI](https://img.shields.io/github/actions/workflow/status/icrefin/dsh-session-monitor/ci.yml?branch=main&style=flat-square)](https://github.com/icrefin/dsh-session-monitor/actions/workflows/ci.yml)
+[![Last commit](https://img.shields.io/github/last-commit/icrefin/dsh-session-monitor?style=flat-square)](https://github.com/icrefin/dsh-session-monitor/commits/main)
+[![Stars](https://img.shields.io/github/stars/icrefin/dsh-session-monitor?style=flat-square)](https://github.com/icrefin/dsh-session-monitor/stargazers)
+
+A live grid of every DeepSeek Harness session — transcript or the whole-session flow, with its own composer.
+
 DeepSeek Harness shows one conversation at a time. While several sessions work in
 parallel, the sidebar tells you *that* a session is running or waiting — the
 question itself, the turn it is in, and the message it wants to send stay behind
@@ -16,11 +26,12 @@ its own row. This plugin adds **Session Monitor** to the left sidebar, directly 
 └──────────────────────────────────┴──────────────────────────────────┘
 ```
 
-Each card carries, for a session you are **not** viewing:
+Each card carries, for a session you are **not** viewing either:
 
 - **its live transcript** — your prompts, the assistant's streaming text, tool
   calls with their outcome, and approval/retry notices, updated as the session
-  writes them;
+  writes them; in **Flow** mode the transcript rows are replaced with the numbered
+  flow view from `dsh-session-progress` (see [Two views](#two-views));
 - **the pending question or approval**, answerable in the card;
 - **a composer** that sends a prompt to that session; while the session runs it
   enters the next-turn inbox (no Queue/Steer toggle);
@@ -53,11 +64,60 @@ folder…**, opens the host's folder chooser and adopts the picked directory as 
 new Workspace first, so you can start a session in a folder the sidebar does not
 list yet. The chosen Workspace is remembered in this browser.
 
-## Picking this up elsewhere
+## Screenshots
 
-This directory carries a [HANDOFF.md](./HANDOFF.md): current state, the architecture and its exact
-data sources, the liveness heuristics, what was verified, what was not, pitfalls, and the next
-steps. Read it before changing behaviour.
+![Flow mode cards with the composer and a pending answer block](docs/images/flow-mode.png)
+
+Flow mode replaces the transcript rows with the whole session: the status header, step rail,
+activity card, numbered prompts and steps, and the card's own composer, selectors, usage and
+pending answer block. The image is a component render with synthetic data, not a capture of a
+real session.
+
+## Two views
+
+The toolbar carries a **Transcript | Flow** switch, and the choice is remembered in
+this browser beside the card budget:
+
+- **Transcript** is the original monitor: the live transcript, the pending question,
+  the queue and the composer.
+- **Flow** replaces only a card's transcript rows with the exact view the **Session
+  Progress** plugin (`dsh-session-progress`) draws in the right Sidebar. The card
+  keeps its own head — title, Workspace, remove — and its own actions: the pending
+  answer block, the queue, the composer with permission and model selectors, the
+  usage readout, Stop and Send. The flow fills the space between them:
+
+  - a status pill (*Running*, *Waiting for you*, *Turn complete*, *Turn failed*,
+    *Idle*), the turn number and the elapsed clock;
+  - the current prompt, clipped to two lines, and a rail with one segment per
+    step of the current turn;
+  - the activity card: the tool in flight, the thinking text still arriving, the
+    approval or question the session waits on, or the turn's ending;
+  - the whole session as a numbered list, from its first prompt: every prompt is
+    a tinted `You` block (`1`, `2`, `3`…), every agent step is numbered under it
+    (`1.1`, `1.2`, `2.1`…) with its status mark and local start time;
+  - a footer with the session's prompt and step totals.
+
+  A pending question keeps its answer block at the top of the flow body, so the
+  controls share the list's scroll region and a long question cannot push the
+  flow header out of a short card. The flow list follows the tail unless a pending
+  request holds it at the top.
+
+  The view uses the same theme tokens and the same `dsh-session-progress`
+  layout and copy, ported into this bundle under its own `dsf-` class prefix, so
+  enabling both plugins cannot make the two stylesheets collide. Only the
+  progress panel's model-written command descriptions are absent: this plugin
+  keeps its host half empty, so a shell step shows the panel's own local purpose
+  phrase (*Running tests*) and never the command text. The title is that purpose alone, with its first letter capitalized; the row meta line already names the tool.
+
+Flow needs the session from its first prompt, so in that mode a card asks its
+retained binding for the older history pages (`binding.session.loadOlder()`)
+until the start is loaded. The transcript mode keeps its readable tail window;
+the retained stream is the same one in both modes.
+
+The flow panel is a tall surface: its header alone is most of a 220 px grid cell.
+Flow mode therefore gives every card a **480 px minimum height** and scrolls the
+grid when the cards no longer fit, instead of squeezing the view into a strip.
+Transcript mode keeps the original contract — every card on one page.
 
 ## The grid
 
@@ -89,6 +149,10 @@ steps. Read it before changing behaviour.
 - **Cards per row.** The toolbar's **Per row** control sets an exact count (2–6)
   or leaves the grid on **Auto**, which fills the column with 260px cards. The
   choice is remembered beside the removed ids.
+- **View mode.** The toolbar's **Transcript | Flow** switch sets how every card
+  presents its session. It is a reading preference, stored with the other
+  preferences and restored on the next visit; it never changes which sessions
+  are shown or where their cards sit.
 - **Removal.** Removed ids are stored in this browser's `localStorage`
   (`dsh-session-monitor:prefs`). A removed session keeps running, keeps its
   history and stays in the sidebar; only this grid forgets it. The toolbar's
@@ -124,7 +188,8 @@ because every fact it needs already exists in the client:
 | Workspace title shown on the card | `ctx.workspaces.list` |
 | pending question / approval | `ctx.uiSession.sessionStatus` |
 | live run state of one card | `binding.session.getSnapshot().running` |
-| live transcript | `ctx.sessions.retain()` → `binding.eventSource` |
+| live transcript, and the flow view's event log | `ctx.sessions.retain()` → `binding.eventSource` |
+| older history pages for the flow view | `binding.session.loadOlder()` |
 | send a prompt | `binding.session.prompt(content, 'queue')` |
 | answer a pending request | the carrier's own `answer()` |
 | current permission preset | `binding.session.projections.faceOf('permissions')` |
@@ -239,13 +304,15 @@ answer was accepted.
   in the conversation view.
 - **Removal is local by design.** "Remove from monitor" is a statement about this
   panel, not about the session, so it must not touch the host log or the sidebar.
-- **The panel is one fixed page, never a scrolling document.** It takes the whole centre column and the whole
-  height below its header; the column count and row count are solved from that box, so every card is on screen
-  at once with no page scrollbar. **Auto** picks the column count whose cells stay closest to the nominal card
-  size; an explicit **Per row** count is honoured and its rows are still fitted. Card bodies hide their scrollbar
-  and follow their tail, so reading a long transcript never moves the grid. A pending question renders inside that scroll
-  region (starting with the question itself — the card header already names the waiting state) with its answer row pinned to the card's bottom, and narrow cards drop the time, the state word, then the
-  queue action buttons so the Workspace name and the answer controls survive.
+- **Transcript mode is one fixed page; Flow mode is a scrollable grid.** Transcript mode takes the whole centre
+  column and the whole height below its header; the column count and row count are solved from that box, so every
+  card is on screen at once with no page scrollbar. Flow mode keeps the card's composer and actions, so each card
+  gets a **480 px minimum height** and the grid scrolls when the cards no longer fit. **Auto** picks the column
+  count whose cells stay closest to the nominal card size; an explicit **Per row** count is honoured. A card body
+  scrolls only inside its own cell: the transcript hides its scrollbar and follows its tail; the flow body uses the
+  progress panel's styled scrollbar. A pending question uses that same scroll region, with its answer row pinned to
+  the card's bottom; narrow cards drop the time, the state word, then the queue action buttons so the Workspace
+  name and the answer controls survive.
 - **A card's status comes from that card's own session.** `binding.session.getSnapshot().running` is the
   authoritative per-session run bit: the Host's status event calls `Session.handleRunning()`. The catalog row is
   only the fallback, so a lagging shared snapshot can never hide live work. Each card reconciles its two snapshots
@@ -274,7 +341,7 @@ answer was accepted.
 ## Verified
 
 - `pnpm check` — typecheck of both halves and the tests, the built bundle, then
-  the test run: **168 tests**, including a jsdom mount of the real page against
+  the test run: **236 tests**, including a jsdom mount of the real page against
   fake projections (ordering, live window, question answer, prompt send, removal,
   open failure, a long answer rendered whole, the new-session control's default
   Workspace, its start call, folder adoption, a cancelled chooser and a refused
@@ -304,15 +371,18 @@ answer was accepted.
   a string (the title fallback called `.split()`), and a `null` row for an id the
   page spawned (the prune effect read `.blank`). The fallback also prints the
   one-line reason it caught, so a recurrence is readable in place.
-- `scripts/dev-profile.sh` — an isolated profile boots the row and serves
-  `/plugins/dsh-session-monitor/client.js`.
-- **The panel in a real browser** (2026-11-15, headless Chrome over CDP against an isolated profile
-  seeded with nine real session logs): the sidebar opens the monitor, the page draws its header,
-  toolbar and grid, the cards show their titles and transcripts, and no page boundary, card boundary
-  or console error appears. The same run reproduced the 0.11.5 failure
-  (`cannot get property "uiSession.sessionStatus" without inject`), which pins the fix to that call.
-- Not verified: dark theme and narrow widths in a real browser (the jsdom and layout checks cover the
-  stylesheet contract), the Electron window itself, and the waiting-card answer flow on real streams.
+- **The panel in a real browser** (2026-11-23, 0.14.3, headless Chrome over CDP against a private
+  `DSH_HOME` with three real session logs): the sidebar opens the monitor; the toolbar reads
+  **Transcript | Flow**; Flow draws three progress panels (260, 223 and 367 steps), keeps all three
+  composers (the prompt input, permission and model selectors, usage and Send), keeps 480 px cards
+  with a scrolling grid, and returns to the transcript when switched back. The same composition was checked in the light and dark themes at 1440×900 and at 1000×700
+  (two columns, 480 px cards, no page overflow), and a fresh tab reported no console errors. The
+  0.11.5 failure (`cannot get property "uiSession.sessionStatus" without inject`) was reproduced in
+  an earlier run and remains covered by `test/session-status.spec.ts`.
+- Not verified: the operator's main profile was not reloaded during this work (a page reload or an
+  app restart loads the client half), the Electron window itself, and the waiting-card answer flow on
+  real streams — the waiting flow state was rendered from a static component fixture, not observed on
+  a live blocked session.
 
 ## Install
 
@@ -339,15 +409,26 @@ src/client/MonitorPanel.tsx      registered entry: the bounded page
 src/client/MonitorPage.tsx       grid, toolbar, card selection
 src/client/CardBudgetControl.tsx card-budget stepper (− / number / +)
 src/client/NewSessionControl.tsx new-session button + Workspace drop-down
-src/client/SessionCard.tsx       one card: header, transcript, pending, composer
+src/client/SessionCard.tsx       one card: header, transcript or flow, pending, composer
+src/client/FlowView.tsx          the session-progress view, embedded in a card
+src/client/flowProgress.ts       the session-wide flow derivation (pure)
+src/client/flowTitles.ts         step titles and the activity detail
+src/client/flowBashPurpose.ts    the local phrase for a shell command
+src/client/FlowIcons.tsx         step and empty-state glyphs
 src/client/InteractionCard.tsx   question/approval answer block
 src/client/model.ts              which sessions, what happened, localized text (pure)
-src/client/store.ts              removed ids + card budget (localStorage)
+src/client/store.ts              removed ids, budget, view mode (localStorage)
 src/client/useSessionFeed.ts     retain/follow/release one session
 src/client/styles.ts             theme-token stylesheet
-test/                            model, store, manifest, page (jsdom), robustness, built bundle
+test/                            model, flow, store, manifest, page (jsdom), robustness, built bundle
 ```
 
 ## License
 
 MIT.
+
+---
+
+Contributions are welcome — see [CONTRIBUTING.md](.github/CONTRIBUTING.md). Report security issues through [SECURITY.md](.github/SECURITY.md).
+
+If this grid saves you a trip through browser tabs, a ⭐ helps other DSH users find it.

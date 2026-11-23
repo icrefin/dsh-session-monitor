@@ -1,7 +1,7 @@
 {
   "name": "dsh-session-monitor",
-  "version": "0.11.8",
-  "description": "Multi-grid live monitor for every active and recently used session: transcript, pending questions and prompts, all in one panel",
+  "version": "0.14.3",
+  "description": "Multi-grid live monitor for every active and recently used session: transcript or the session flow view, pending questions and prompts, in one panel",
   "keywords": [
     "deepseek-harness",
     "dsh",
@@ -12,6 +12,8 @@
     "monitor",
     "dashboard",
     "multi-session",
+    "flow",
+    "progress",
     "session-monitor",
     "sidebar"
   ],
@@ -40,11 +42,12 @@
     "README.zh-CN.md"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.build.json && tsdown",
+    "build": "pnpm clean && tsc -p tsconfig.build.json && tsdown",
     "typecheck": "tsc -p tsconfig.json && tsc -p tsconfig.client.json && tsc -p tsconfig.test.json",
     "test": "vitest run",
     "check": "pnpm typecheck && pnpm build && pnpm test",
-    "pack": "pnpm build && pnpm pack --pack-destination dist"
+    "pack": "pnpm build && pnpm pack --pack-destination dist",
+    "clean": "node -e \"require('node:fs').rmSync('lib',{recursive:true,force:true})\""
   },
   "dsh": {
     "manifestVersion": 1,

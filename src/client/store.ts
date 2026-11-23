@@ -12,6 +12,19 @@
 
 import { clampMaxCards, DEFAULT_MAX_CARDS, MAX_COLUMNS, ORDER_LIMIT } from './model.ts'
 
+/**
+ * How the monitor grid presents each session.
+ *
+ * `transcript` is the original card: the live word stream with its composer.
+ * `flow` replaces that body with the same session-wide flow view the
+ * `dsh-session-progress` panel draws — numbered prompts, numbered steps, the
+ * current activity and the waiting state.
+ */
+export type MonitorView = 'transcript' | 'flow'
+
+/** The view a mount shows before the user picks one. */
+export const DEFAULT_VIEW: MonitorView = 'transcript'
+
 /** Storage key of the monitor's preferences. */
 export const STORAGE_KEY = 'dsh-session-monitor:prefs'
 
@@ -57,6 +70,14 @@ export interface MonitorPrefs {
   /** Cards per row; `0` lets the grid fill the column automatically. */
   readonly columns: number
   /**
+   * How each card presents its session: the live transcript, or the
+   * session-wide flow view.
+   *
+   * This is a reading preference, so it is remembered across mounts instead of
+   * resetting with every visit. It never changes which sessions are shown.
+   */
+  readonly view: MonitorView
+  /**
    * The Workspace the toolbar's new-session control last started in.
    *
    * It is a remembered choice, not a fact: a Workspace that no longer exists is
@@ -90,6 +111,7 @@ export function parsePrefs(raw: string | null): MonitorPrefs {
     order: [],
     maxCards: DEFAULT_MAX_CARDS,
     columns: 0,
+    view: DEFAULT_VIEW,
     newWorkspaceId: undefined,
   }
   if (raw === null || raw.trim() === '') return defaults
@@ -129,6 +151,7 @@ export function parsePrefs(raw: string | null): MonitorPrefs {
       order,
       maxCards: clampMaxCards(max),
       columns: Math.max(0, Math.min(MAX_COLUMNS, columns)),
+      view: record.view === 'flow' ? 'flow' : DEFAULT_VIEW,
       newWorkspaceId:
         typeof record.newWorkspaceId === 'string' && record.newWorkspaceId !== ''
           ? record.newWorkspaceId
@@ -308,6 +331,16 @@ export class MonitorStore implements MonitorPrefsSource {
   }
 
   /**
+   * Choose how every card presents its session.
+   * @param view - the transcript, or the session-wide flow view.
+   */
+  setView(view: MonitorView): void {
+    const next: MonitorView = view === 'flow' ? 'flow' : DEFAULT_VIEW
+    if (next === this.#snapshot.view) return
+    this.#commit({ ...this.#snapshot, view: next })
+  }
+
+  /**
    * Remember the Workspace the new-session control starts in.
    * @param workspaceId - chosen Workspace, or `undefined` to forget it.
    */
@@ -362,6 +395,7 @@ export class MonitorStore implements MonitorPrefsSource {
           order: next.order,
           maxCards: next.maxCards,
           columns: next.columns,
+          view: next.view,
           newWorkspaceId: next.newWorkspaceId,
         }),
       )

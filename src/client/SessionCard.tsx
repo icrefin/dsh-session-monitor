@@ -20,6 +20,7 @@ import {
   type KeyboardEvent,
   type ReactElement,
 } from 'react'
+import { FlowView } from './FlowView.tsx'
 import { InteractionCard } from './InteractionCard.tsx'
 import { useModelDirectory } from './useModelDirectory.ts'
 import type { MonitorTranslate } from './locales.ts'
@@ -39,7 +40,7 @@ import {
   type MonitoredSession,
   type TranscriptRow,
 } from './model.ts'
-import type { MonitorStore } from './store.ts'
+import type { MonitorStore, MonitorView } from './store.ts'
 import type {
   ModelDirectoryLike,
   PermissionCatalogLike,
@@ -69,6 +70,8 @@ export interface SessionCardProps {
   readonly modelDirectoryFor?: ((sessionId: string) => ModelDirectoryLike | undefined) | undefined
   /** Open this session in the conversation view, when the navigation service exists. */
   readonly openSession?: ((sessionId: string) => void) | undefined
+  /** How this card presents its session: the transcript, or the session flow. */
+  readonly view: MonitorView
   /** Whether the user already looked at this Session's finished run. */
   readonly acknowledged?: boolean | undefined
   /**
@@ -235,10 +238,13 @@ export function SessionCard({
   permissionCatalog,
   modelDirectoryFor,
   openSession,
+  view,
   acknowledged,
   resolveText,
 }: SessionCardProps): ReactElement {
-  const feed = useSessionFeed(sessions, session.id, session.updatedAt)
+  // The flow view draws the whole session, so it asks the binding to load the
+  // older pages; the transcript keeps its readable tail window.
+  const feed = useSessionFeed(sessions, session.id, session.updatedAt, { fullHistory: view === 'flow' })
   const [draft, setDraft] = useState('')
   const [busy, setBusy] = useState(false)
   const [promptFailed, setPromptFailed] = useState(false)
@@ -289,6 +295,19 @@ export function SessionCard({
 
   const rows = useMemo(() => deriveTranscript(feed.entries), [feed.entries])
   const pending = session.pending
+  /**
+   * The pending interaction as the flow view needs it: its approval copy
+   * resolved through the active UI language when the Host published a map.
+   * `deriveProgress` normalizes a plain string or a map, but the monitor already
+   * has the resolver the card's own approval block uses.
+   */
+  const flowPending = useMemo(() => {
+    if (pending === undefined) return undefined
+    const reason = pending.displayReason
+    if (typeof reason !== 'object' || reason === null || resolveText === undefined) return pending
+    const resolved = resolveText(reason)
+    return resolved === '' ? pending : { ...pending, displayReason: resolved }
+  }, [pending, resolveText])
   // The retained binding is the run state of this exact session; the catalog row
   // is the fallback before the binding reports and after it goes away. Either
   // source saying "running" wins, so a lagging snapshot never hides live work.
@@ -305,6 +324,8 @@ export function SessionCard({
 
   const pendingKey = pending?.key ?? ''
   useEffect(() => {
+    // The flow view owns its own scroll and follow behaviour.
+    if (view === 'flow') return
     const body = bodyRef.current
     if (body === null) return
     // A pending request is the reason the card exists, so it owns the top of the
@@ -316,7 +337,7 @@ export function SessionCard({
     }
     stickRef.current = true
     body.scrollTop = body.scrollHeight
-  }, [feed.entries, pendingKey])
+  }, [feed.entries, pendingKey, view])
 
   const permissionOptions = useMemo(() => {
     const options = permissionCatalog?.options
@@ -649,6 +670,7 @@ export function SessionCard({
     <article
       className="dsm-card"
       data-state={state}
+      data-mode={view}
       data-session-id={session.id}
       aria-label={session.title}
       onClick={acknowledge}
@@ -692,8 +714,29 @@ export function SessionCard({
         </button>
       </header>
 
-      <div className="dsm-body" ref={bodyRef} onScroll={onScroll}>
-        {pending === undefined ? null : (
+      {view === 'flow' ? (
+        <FlowView
+          t={t}
+          entries={feed.entries}
+          running={running}
+          pending={flowPending}
+          opening={feed.opening}
+          failed={feed.error}
+          holdTop={pending !== undefined}
+          pendingSlot={
+            pending === undefined ? undefined : (
+              <InteractionCard
+                key={pending.key ?? 'pending'}
+                interaction={pending}
+                t={t}
+                resolveText={resolveText}
+              />
+            )
+          }
+        />
+      ) : (
+        <div className="dsm-body" ref={bodyRef} onScroll={onScroll}>
+            {pending === undefined ? null : (
           <InteractionCard
             key={pending.key ?? 'pending'}
             interaction={pending}
@@ -708,7 +751,8 @@ export function SessionCard({
         ) : (
           rows.map((row) => <TranscriptLine key={row.key} row={row} t={t} />)
         )}
-      </div>
+        </div>
+      )}
 
       {queueView.visible.length === 0 ? null : (
         <div className="dsm-queue" aria-label={t('queuedCount', { count: queueView.total })}>

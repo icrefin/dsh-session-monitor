@@ -112,6 +112,18 @@ export interface SessionStatusLike {
   readonly completionUnread?: boolean
 }
 
+/** One content block of a message (user text or an assistant block). */
+export interface BlockLike {
+  /** Message content discriminator (`text`), or the assistant block's `kind`. */
+  readonly type?: string
+  /** Assistant block discriminator (`text`, `reasoning`, `tool-call`). */
+  readonly kind?: string
+  readonly text?: string
+  readonly callId?: string
+  readonly name?: string
+  readonly argsRaw?: string
+}
+
 /** A durable session event or a Client-only transient chunk. */
 export interface EventLike {
   readonly type?: string
@@ -269,6 +281,8 @@ export interface SessionFaceLike {
   getSnapshot?(): SessionSnapshotLike
   /** Subscribe to lifecycle changes (running, blank, errors, queue echoes). */
   subscribe?(listener: () => void): () => void
+  /** Prepend the next older history page; a no-op when the start is already loaded. */
+  loadOlder?(options?: { readonly deferConsumption?: boolean }): Promise<void>
   /** Rebuild the history window and tail stream after a terminal stream failure. */
   resync?(): Promise<void>
   prompt?(

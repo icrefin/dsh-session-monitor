@@ -81,6 +81,9 @@ export interface MonitorPageProps {
 /** Explicit cards-per-row choices; `0` (Auto) is offered separately. */
 const COLUMN_CHOICES = [2, 3, 4, 5, MAX_COLUMNS]
 
+/** Shortest cell the flow view is readable in; the grid scrolls beyond this. */
+const FLOW_MIN_CARD_HEIGHT = 480
+
 /**
  * Stable empty Workspace list.
  *
@@ -344,10 +347,21 @@ export function MonitorPage({
   const count = monitored.length
   const columns = prefs.columns > 0 ? Math.min(prefs.columns, Math.max(1, count)) : autoColumns(count, box.width, box.height)
   const rows = gridRows(count, columns)
-  const gridStyle = {
-    gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
-    gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
-  }
+  // Transcript mode keeps the original promise: every card fits on the page.
+  // The flow view is a tall panel (its header alone is most of a 220px cell), so
+  // flow mode gives each card a readable minimum height and lets the grid scroll
+  // instead of compressing the view into a strip.
+  const flow = prefs.view === 'flow'
+  const gridStyle = flow
+    ? {
+        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+        gridAutoRows: `minmax(${FLOW_MIN_CARD_HEIGHT}px, auto)`,
+        alignContent: 'start',
+      }
+    : {
+        gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
+        gridTemplateRows: `repeat(${rows}, minmax(0, 1fr))`,
+      }
 
   return (
     <div className="dsm-page">
@@ -384,6 +398,24 @@ export function MonitorPage({
             </span>
           )}
           <span className="dsm-spacer" />
+          <div className="dsm-modes" role="group" aria-label={t('viewMode')}>
+            <button
+              type="button"
+              className="dsm-modeBtn"
+              aria-pressed={prefs.view === 'transcript'}
+              onClick={() => store.setView('transcript')}
+            >
+              {t('viewCards')}
+            </button>
+            <button
+              type="button"
+              className="dsm-modeBtn"
+              aria-pressed={prefs.view === 'flow'}
+              onClick={() => store.setView('flow')}
+            >
+              {t('viewFlow')}
+            </button>
+          </div>
           <CardBudgetControl t={t} value={prefs.maxCards} onChange={handleMaxCards} />
           <label className="dsm-stat" htmlFor="dsm-columns">
             {t('columns')}
@@ -417,7 +449,7 @@ export function MonitorPage({
             <div className="dsm-emptyBody">{t('emptyBody')}</div>
           </div>
         ) : (
-          <div className="dsm-grid" ref={gridRef} style={gridStyle}>
+          <div className="dsm-grid" data-mode={prefs.view} ref={gridRef} style={gridStyle}>
             {monitored.map((entry) => (
               <CardErrorBoundary key={entry.id} t={t} title={entry.title}>
                 <SessionCard
@@ -431,6 +463,7 @@ export function MonitorPage({
                   openSession={openSession}
                   acknowledged={prefs.acknowledged.has(entry.id)}
                   resolveText={resolveText}
+                  view={prefs.view}
                 />
               </CardErrorBoundary>
             ))}

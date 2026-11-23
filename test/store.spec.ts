@@ -48,6 +48,13 @@ describe('parsePrefs', () => {
     expect(parsePrefs('{}').columns).toBe(0)
   })
 
+  it('reads the remembered view and falls back to the transcript', () => {
+    expect(parsePrefs('{}').view).toBe('transcript')
+    expect(parsePrefs('{"view":"flow"}').view).toBe('flow')
+    expect(parsePrefs('{"view":"cards"}').view).toBe('transcript')
+    expect(parsePrefs('{"view":3}').view).toBe('transcript')
+  })
+
   it('reads ids and clamps the card budget', () => {
     expect([...parsePrefs('{"hidden":["a","b",3,""],"maxCards":2}').hidden]).toEqual(['a', 'b'])
     expect(parsePrefs('{"maxCards":9999}').maxCards).toBe(MAX_CARDS_LIMIT)
@@ -103,6 +110,7 @@ describe('MonitorStore', () => {
       order: [],
       maxCards: DEFAULT_MAX_CARDS,
       columns: 0,
+      view: 'transcript',
     })
 
     // A fresh store reads what the previous one wrote: removal survives a reload.
@@ -133,6 +141,18 @@ describe('MonitorStore', () => {
     expect(store.getSnapshot().columns).toBe(0)
     store.setColumns(3)
     expect(new MonitorStore(storage).getSnapshot().columns).toBe(3)
+  })
+
+  it('remembers the view choice and restores it after a reload', () => {
+    const storage = new FakeStorage()
+    const store = new MonitorStore(storage)
+    expect(store.getSnapshot().view).toBe('transcript')
+    store.setView('flow')
+    expect(store.getSnapshot().view).toBe('flow')
+    expect(new MonitorStore(storage).getSnapshot().view).toBe('flow')
+    store.setView('transcript')
+    expect(store.getSnapshot().view).toBe('transcript')
+    expect(new MonitorStore(storage).getSnapshot().view).toBe('transcript')
   })
 
   it('steps the card budget one at a time inside the supported range', () => {

@@ -1,7 +1,7 @@
 # Handoff — dsh-session-monitor
 
-**Version:** 0.11.8 · **Runtime:** dsh 0.2.2-rc.3 · **Host:** DeepSeek Harness web GUI
-**Written:** 2026-11-02 · **Updated:** 2026-11-21 (0.11.8: a card title click now also unfolds the Workspace group that holds the Session — `src/client/workspaceReveal.ts` resolves the owner from `ctx.workspaces.list` membership (cwd fallback) and clicks the sidebar's folded `workspace:<id>` tree item before navigating, because the host only auto-expands groups with no explicit expansion entry. 0.11.7: the card head is one step above the transcript — the session title is the content size plus 4 px (18 px at the default) and the workspace/state/time line under it is exactly 1.5x smaller (12 px), both still reading the global content-font token. 0.11.6: the real "This page could not be drawn" cause — a read of the nested Cordis service `uiSession.sessionStatus` through the context proxy, which the rc.3 runtime rejects during render; it is now resolved reflectively. 0.11.5 closed the page-level foreign-data holes around it and made the fallback print its reason)
+**Version:** 0.14.3 · **Runtime:** dsh 0.2.2-rc.3 · **Host:** DeepSeek Harness web GUI
+**Written:** 2026-11-02 · **Updated:** 2026-11-23 (0.14.3 keeps every card action in Flow mode: the pending answer block sits at the top of the flow body, and the queue plus the composer with permission/model/usage/Stop/Send stay below the flow. Flow mode now gives cards a 480 px minimum. 0.14.2 syncs the flow titles with dsh-session-progress 0.3.5: a shell step's purpose is the title itself, capitalized, and the "Using bash:" prefix is gone. 0.14.1: a toolbar **Transcript | Flow** switch. Flow replaces each card's transcript body with the exact `dsh-session-progress` panel — status, turn, elapsed, current prompt, step rail, activity card, the whole session as numbered prompt blocks and steps, totals — ported under the `dsf-` class prefix, and the card asks its retained binding for the older history pages. The transcript, pending block, queue and composer return with Transcript. See section 1a. 0.11.8: a card title click now also unfolds the Workspace group that holds the Session — `src/client/workspaceReveal.ts` resolves the owner from `ctx.workspaces.list` membership (cwd fallback) and clicks the sidebar's folded `workspace:<id>` tree item before navigating, because the host only auto-expands groups with no explicit expansion entry. 0.11.7: the card head is one step above the transcript — the session title is the content size plus 4 px (18 px at the default) and the workspace/state/time line under it is exactly 1.5x smaller (12 px), both still reading the global content-font token. 0.11.6: the real "This page could not be drawn" cause — a read of the nested Cordis service `uiSession.sessionStatus` through the context proxy, which the rc.3 runtime rejects during render; it is now resolved reflectively. 0.11.5 closed the page-level foreign-data holes around it and made the fallback print its reason)
 **Repo:** this repository (`dsh-plugins`), directory `dsh-session-monitor/`
 
 This document is for the next person (or agent) picking this work up on **another machine**.
@@ -11,9 +11,9 @@ It records what exists, what was verified, what was not, and what to do next.
 
 ## 1. One-paragraph status
 
-The plugin is feature-complete for its stated purpose and passes `pnpm check` (168 tests, both
+The plugin is feature-complete for its stated purpose and passes `pnpm check` (236 tests, both
 halves typechecked, loader bundle built). It is installed into the **web profile** on the machine
-where it was written, currently **0.11.4**. The 0.11.4 fix answers the reported symptom — an
+where it was written, currently **0.14.3**. The 0.11.4 fix answers the reported symptom — an
 occasional blank centre column that only a browser reload cleared: an approval carrying a
 `displayReason` locale map was handed to React as a child, the render threw, and the shell retired
 the `main` entry for the rest of the page's life. Copy is now resolved to a string, and a page/card
@@ -22,11 +22,62 @@ checked by an agent** (no browser control); the user reloads the page to pick up
 
 ---
 
+## 1a. 0.14.3 — Flow mode
+
+**0.14.3** keeps every card action in Flow mode. Only the transcript rows are replaced: the pending
+answer block moves to the top of the flow body (inside its scroll region), and the queue plus the
+composer with permission/model/usage/Stop/Send stay below the flow. Flow cards get a 480 px minimum.
+The composer sends through the same `session.prompt()` in both modes; the pending block answers
+through the carrier's own `answer()`.
+
+**0.14.2** syncs the ported view with `dsh-session-progress` 0.3.5. A shell step's purpose is now
+the title itself, capitalized (`Running tests`), with no `Using bash:` prefix; the row meta line
+already names the tool. The `flowStepBashPurpose` locale key is gone. `flowTitles.ts` carries the
+same `capitalizeFirst` helper and applies it to both the step title and the activity detail, and
+`test/flow-titles.spec.ts` pins that rule (including CJK and numeric first characters).
+
+The toolbar carries a **Transcript | Flow** switch (`view` in `dsh-session-monitor:prefs`, default
+`transcript`). The choice is per browser and never changes which sessions are shown.
+
+- **Flow** replaces the card body with the Session Progress panel. `src/client/FlowView.tsx` is a
+  port of `dsh-session-progress/src/client/ProgressTab.tsx`; it keeps the same header (status pill,
+  turn, elapsed, current prompt, step rail, count chips, activity card, error card), the same
+  scrolling numbered list (prompt blocks and `1.1`, `1.2` step rows with status glyph, title, tools
+  and files, and a local start-time stamp), and the same footer totals.
+- `src/client/flowProgress.ts` is the derivation port (`deriveProgress`, `pendingText`,
+  `formatStamp`, `formatClock`, the argument/file helpers). `flowTitles.ts`, `flowBashPurpose.ts`
+  and `FlowIcons.tsx` are the title/fallback/glyph ports. The stylesheet is the progress panel's CSS
+  with `dsp-` → `dsf-`, so both plugins can be enabled without stylesheet collisions.
+- **No host half was added.** The progress panel's model-written shell purposes need its host route;
+  the monitor stays host-empty and therefore always uses the local purpose phrase (still never the
+  command text). The purpose is the title itself, capitalized; this is the one intentional
+  difference.
+- **Whole session.** In flow mode `useSessionFeed(..., { fullHistory: true })` asks the retained
+  binding for older pages (`binding.session.loadOlder()`) until `hasMore` is false, a page adds
+  nothing, the 500-page cap is hit, or the card unmounts. The transcript mode keeps its tail window;
+  switching modes does not re-open the stream.
+- **Card chrome.** The card head stays (title, Workspace, remove). Its state word and relative time
+  are hidden in flow mode because the flow header reports both, and the card's ground becomes the
+  progress panel's `bg-base`. Flow replaces only the transcript rows: the pending answer block, the
+  queue, and the composer with its permission/model selectors, usage readout, Stop and Send stay.
+  A pending question renders at the top of the flow body (inside its scroll region, so a long
+  question cannot clip the flow header); its copy is resolved through `ctx.locale.resolveText` when
+  it is a locale map. The flow list holds at the top while that request stands and follows the tail
+  otherwise.
+- **Tests.** `test/flow.spec.ts` pins the ported derivation (26 cases from the progress suite);
+  `test/flow-view.spec.tsx` renders the component to static markup and can write a standalone
+  preview page (`FLOW_PREVIEW_OUT=<path>`); `test/page.spec.tsx` switches Transcript → Flow → Transcript and
+  checks the numbered list, the persisted preference, the older-page load, the composer and pending
+  answer block in both modes, and sending a prompt from Flow mode.
+
+---
+
 ## 2. What the plugin does
 
 - Adds a **Sessions** row to the left sidebar, directly under **Plugins** (`order: 5`).
 - Opens a **fixed, full-width grid** in the centre column: one card per active or recently used
-  root session. Every card fits on one page — the panel itself never scrolls.
+  root session. In Transcript mode every card fits on one page — the panel itself never scrolls;
+  Flow mode gives each card a readable 480 px minimum and scrolls the grid when they no longer fit.
 - Each card shows: the session title, its **Workspace title** (normal text colour), state and
   activity time; a **live transcript** (prompts, assistant text, tool calls, notices); a pending
   **question/approval** that can be answered in place; and a **composer** that sends a prompt
@@ -126,13 +177,19 @@ host half deliberately — but do not duplicate transport for facts above.
 
 - `.dsm-page` fills the centre column: `height:100%`, `overflow:hidden`, flex column.
 - `.dsm-inner` is the only child; header and toolbar are `flex:none`, the grid is `flex:1`.
-- The grid gets **both** track lists inline: `repeat(columns, minmax(0,1fr))` and
+- Transcript mode sets **both** track lists inline: `repeat(columns, minmax(0,1fr))` and
   `repeat(rows, minmax(0,1fr))`. `rows = ceil(cards / columns)`.
+- Flow mode keeps the column list, drops the row list, and sets
+  `grid-auto-rows: minmax(480px, auto)` with `align-content:start`; the grid itself
+  becomes the vertical scroll region (`overflow-y:auto`, thin scrollbar). The flow
+  panel header is tall, so a 220 px cell would leave almost no list visible.
 - **Auto** columns come from `autoColumns(count, width, height)`, measured with a `ResizeObserver`
   on the grid: each candidate column count is scored by `min(cellW/300, cellH/220)`, best wins.
 - **Per row** is an exact 2–6 choice and is clamped to the card count.
-- Card bodies are the only scroll regions; their scrollbar is hidden. The body follows its tail
-  (unless a pending request holds it at the top).
+- In Transcript mode the card body is the only scroll region and its scrollbar is hidden. In Flow
+  mode the progress body scrolls with the panel's thin styled scrollbar; a pending answer block sits
+  at the top of that scroll region. The flow list follows its tail unless a pending request holds it
+  at the top.
 - A pending block starts with the question itself (the card header already says *waiting for you*);
   its answer row is `position:sticky; bottom:0` inside the card body.
 - Container queries on each card (`container-type:inline-size`) drop the time at ≤320 px, the state
@@ -264,7 +321,7 @@ toolbar, no page error). That is the first real-browser check of the panel since
 
 Proven:
 
-- `pnpm check`: 168 tests — model (selection, budget floor/ceiling, the shrink re-seed, transcript, live chunks, whole long messages, grid fit, timestamps, localized approval copy,
+- `pnpm check`: 236 tests — model (selection, budget floor/ceiling, the shrink re-seed, transcript, live chunks, whole long messages, grid fit, timestamps, localized approval copy,
   Workspace label/default rules, stable replacement with the displaced card kept at the order tail),
   store (persistence incl. the remembered new-session Workspace and the spawned-blank set,
   clamping, notification), manifest (three ids, activation order, version chip),
@@ -274,7 +331,8 @@ Proven:
   control's default Workspace, its start call, folder adoption, a cancelled chooser, a refused
   start, a created blank card taking the oldest slot on a full grid, the card-budget stepper
   moving one card per click and clamping at 2 and 24, and a smaller budget re-seeding the grid
-  to the newest sessions), and the **built** bundle
+  to the newest sessions), the flow derivation's 26 fixtures and the title rules, the FlowView static-markup render
+  (including the opening and failure states), and the **built** bundle
   behind a fake loader (loader id, exports, real `apply`, no second React).
 - **Foreign page data** (`test/foreign-data.spec.tsx`, 5 tests): a matrix of single-field mutations
   (every catalog row field, the catalog `ids`/`byId`/`phase`, every status field, every Workspace
@@ -292,6 +350,13 @@ Proven:
   entries, `null` permission options, junk model groups, `null` queued rows) all still render the page.
 - An isolated dsh profile composed the row and served
   `/plugins/??dsh-session-monitor/client.js&rev=…` with HTTP 200.
+- **Flow mode in a real browser** (2026-11-23, 0.14.3, headless Chrome over CDP against a private
+  `DSH_HOME` with three real session logs): the toolbar reads **Transcript | Flow**; Flow renders
+  three `.dsf-root` panels (260/223/367 steps) and keeps all three composers (prompt input,
+  permission/model selectors, usage, Send), the grid keeps 480 px cards and scrolls, and Transcript
+  returns the fitting rows. A pending question was answered in a jsdom Flow-mode test. Light and
+  dark themes were captured at 1440×900; 1000×700 gives two columns, 480 px cards and no page
+  overflow; a fresh tab reports no console errors.
 - **The panel in a real browser** (headless Chrome driven over CDP against the isolated profile on
   2026-11-03, version 0.9.0): the sidebar opens the monitor, the toolbar renders, and repeated
   New Session clicks append cards 1→2→3 with the page still on the monitor. With the card budget
@@ -302,9 +367,10 @@ Proven:
 - Layout in a Vite component fixture with fake data: 9 cards 3×3 and 16 cards 4×4 fit 1440×900,
   9 cards fit 1180×760. Screenshots live in `reports/` (gitignored, not committed).
 
-**Not proven:** the panel inside the Electron window itself, real fonts/DPI, light/dark on the
-desktop build, narrow-width layouts, and the waiting-card answer flow against a live stream. The
-browser check ran the web app in Chrome, which is the same client bundle but not the desktop shell.
+**Not proven:** the operator's main profile was not reloaded during this work (the client half loads
+on the next reload or restart), the panel inside the Electron window itself, real fonts/DPI, and the
+waiting-card answer flow against a live stream (the waiting flow state came from a static fixture).
+The browser check ran the web app in Chrome, which is the same client bundle but not the desktop shell.
 
 **Redone for 0.11.6 (web app in headless Chrome, real sessions):** the panel draws, and the same
 environment reproduced the pre-fix failure with its exact error line. Screenshot kept in

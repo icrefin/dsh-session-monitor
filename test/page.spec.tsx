@@ -23,7 +23,7 @@ import type { ReactElement } from 'react'
 import { MonitorPage } from '../src/client/MonitorPage.tsx'
 import { CHOOSE_FOLDER } from '../src/client/NewSessionControl.tsx'
 import { MAX_CARDS_LIMIT, MIN_CARDS } from '../src/client/model.ts'
-import { MonitorStore } from '../src/client/store.ts'
+import { MonitorStore, STORAGE_KEY } from '../src/client/store.ts'
 import { en, type MonitorKey } from '../src/client/locales.ts'
 import type {
   EventEntryLike,
@@ -286,6 +286,140 @@ describe('MonitorPage', () => {
     // Retention is held while the card is mounted, not released after opening.
     expect(releases.get('session-1')).not.toHaveBeenCalled()
     expect(releases.get('session-2')).not.toHaveBeenCalled()
+  })
+
+  it('switches every card between the transcript and the flow view', async () => {
+    const list = new Source<SessionListSnapshotLike>({
+      ids: ['session-1'],
+      byId: {
+        'session-1': { id: 'session-1', title: 'Flow session', running: false, blank: false, updatedAt: 1_000 },
+      },
+      phase: 'ready',
+    })
+    const entries = [
+      {
+        type: 'durable',
+        event: { type: 'turn/start', seq: 1, time: 10, data: { turn: 1 } },
+      },
+      {
+        type: 'durable',
+        event: {
+          type: 'user/message',
+          seq: 2,
+          time: 11,
+          data: { id: 'm1', content: [{ type: 'text', text: 'Fix the login bug' }], source: { kind: 'user' } },
+        },
+      },
+      {
+        type: 'durable',
+        event: { type: 'step/start', seq: 3, time: 12, data: { turn: 1, step: 1 } },
+      },
+      {
+        type: 'durable',
+        event: {
+          type: 'assistant/message',
+          seq: 4,
+          time: 13,
+          data: { message: { content: [{ type: 'text', text: 'Looking at the auth module' }] } },
+        },
+      },
+      {
+        type: 'durable',
+        event: { type: 'step/end', seq: 5, time: 14, data: { turn: 1, step: 1 } },
+      },
+      {
+        type: 'durable',
+        event: { type: 'turn/end', seq: 6, time: 15, data: { reason: { kind: 'completed' } } },
+      },
+    ]
+    const windows = new Map([['session-1', entries]])
+    // The binding opens on the newest page; the flow view asks for the rest.
+    const loadOlder = vi.fn(async () => {})
+    const prompt = vi.fn(async () => ({ ok: true }))
+    const sessions: SessionsServiceLike = {
+      list,
+      retain: (id: string) => ({
+        sessionId: id,
+        ready: Promise.resolve({
+          session: { sessionId: id, prompt, loadOlder },
+          eventSource: new Source({ entries: windows.get(id) ?? [], hasMore: true }),
+        }),
+        release: vi.fn(),
+      }),
+    }
+    const storage = new FakeStorage()
+    const store = new MonitorStore(storage)
+    const statuses = new Source<ReadonlyMap<string, SessionStatusLike>>(new Map())
+
+    await renderPage(
+      <MonitorPage
+        t={t}
+        store={store}
+        sessions={sessions}
+        uiSession={{ sessionStatus: statuses }}
+      />,
+    )
+
+    // The transcript is the existing mode: the composer is there and the flow
+    // view is not.
+    expect(host.querySelector('.dsm-composer')).not.toBeNull()
+    expect(host.querySelector('.dsf-root')).toBeNull()
+    expect(loadOlder).not.toHaveBeenCalled()
+
+    await clickByText(en.viewFlow)
+
+    expect(store.getSnapshot().view).toBe('flow')
+    expect(JSON.parse(storage.values.get(STORAGE_KEY) ?? '{}').view).toBe('flow')
+    expect(host.querySelectorAll('.dsf-root')).toHaveLength(1)
+    // The flow panel is tall: its grid gives every card a readable minimum and
+    // scrolls, instead of compressing the view into a short cell.
+    const grid = host.querySelector<HTMLElement>('.dsm-grid')
+    expect(grid?.getAttribute('data-mode')).toBe('flow')
+    expect(grid?.style.gridAutoRows).toBe('minmax(480px, auto)')
+    expect(grid?.style.gridTemplateRows).toBe('')
+    expect(host.textContent).toContain('Fix the login bug')
+    expect(host.textContent).toContain('Looking at the auth module')
+    expect([...host.querySelectorAll('.dsf-stepNumber')].map((node) => node.textContent)).toEqual(['1.1'])
+    expect(host.querySelector('.dsf-status')?.textContent).toContain(en.flowStatusDone)
+    // The flow card keeps the monitor's own actions: the composer is still
+    // there and sends through the session's prompt().
+    expect(host.querySelector('.dsm-composer')).not.toBeNull()
+    const textarea = host.querySelector<HTMLTextAreaElement>('.dsm-composer .dsm-input')
+    expect(textarea).not.toBeNull()
+    await typeInto(textarea as HTMLTextAreaElement, 'check the flow')
+    await clickByText(en.send)
+    expect(prompt).toHaveBeenCalledTimes(1)
+    expect((prompt.mock.calls[0] as unknown as [{ type: string; text: string }[]])[0]).toEqual([
+      { type: 'text', text: 'check the flow' },
+    ])
+    // A pending request keeps the monitor's answer block, inside the flow body
+    // so it scrolls with the list instead of pushing the header out.
+    const answer = vi.fn(async () => undefined)
+    await act(async () => {
+      statuses.set(
+        new Map([['session-1', { running: false, pendingInteraction: questionCarrier(answer) }]]),
+      )
+    })
+    await flush()
+    expect(host.querySelector('.dsf-activity')?.getAttribute('data-kind')).toBe('waiting')
+    expect(host.querySelector('.dsf-body .dsm-pending')).not.toBeNull()
+    expect(host.textContent).toContain('Proceed?')
+    await clickByText('Yes')
+    await clickByText('Submit')
+    expect(answer).toHaveBeenCalledWith({ answers: [{ id: 'q1', selected: ['Yes'] }] })
+
+    // Switching after mount still asks the retained binding for the older pages.
+    expect(loadOlder).toHaveBeenCalled()
+
+    await clickByText(en.viewCards)
+
+    expect(store.getSnapshot().view).toBe('transcript')
+    expect(grid?.getAttribute('data-mode')).toBe('transcript')
+    expect(grid?.style.gridTemplateRows).not.toBe('')
+    expect(grid?.style.gridAutoRows).toBe('')
+    expect(host.querySelector('.dsf-root')).toBeNull()
+    expect(host.querySelector('.dsm-composer')).not.toBeNull()
+    expect(host.textContent).toContain('Looking at the auth module')
   })
 
   it('opens a session when its card title is clicked', async () => {

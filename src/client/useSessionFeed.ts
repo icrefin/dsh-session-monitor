@@ -31,6 +31,7 @@ import { REFERENCE_SOURCE } from './plugin.ts'
 import type {
   ContextPressureLike,
   EventEntryLike,
+  EventWindowLike,
   InboxSnapshotLike,
   ObservableSnapshotLike,
   PermissionsSnapshotLike,
@@ -91,6 +92,21 @@ const INITIAL: FeedState = {
 /** How often the card reconciles its two snapshots without a subscription event. */
 const RECONCILE_MS = 2_000
 
+/** Safety cap on older history pages one card loads; a page adds at least one row. */
+const MAX_HISTORY_PAGES = 500
+
+/** How far back one card loads its session history. */
+export interface SessionFeedOptions {
+  /**
+   * Load every older page, not only the newest tail page.
+   *
+   * The transcript reads a readable window; the flow view draws the whole
+   * session, from the first prompt to the newest activity. The pages are loaded
+   * once per retained binding, so switching modes does not re-open the stream.
+   */
+  readonly fullHistory?: boolean
+}
+
 /**
  * Retain one session and follow its lifecycle and event window.
  *
@@ -100,12 +116,15 @@ const RECONCILE_MS = 2_000
  *
  * @param sessions - the client Session service.
  * @param sessionId - the session this card is bound to.
+ * @param activityAt - the catalog's recency, used by the liveness watchdog.
+ * @param options - how much history the card needs.
  * @returns the current feed state.
  */
 export function useSessionFeed(
   sessions: SessionsServiceLike | undefined,
   sessionId: string,
   activityAt: number = 0,
+  options?: SessionFeedOptions,
 ): SessionFeed {
   const [feed, setFeed] = useState<FeedState>(INITIAL)
   /** The service proxy is read from a ref so it never re-triggers retention. */
@@ -114,6 +133,12 @@ export function useSessionFeed(
   /** Catalog recency, read by the interval without re-running the retention effect. */
   const activityRef = useRef(activityAt)
   activityRef.current = activityAt
+  const fullHistory = options?.fullHistory === true
+  /** Read by the ready path without making the retention effect depend on it. */
+  const fullHistoryRef = useRef(fullHistory)
+  fullHistoryRef.current = fullHistory
+  /** The loaded binding's history loader, for a mode switch after mount. */
+  const loadAllRef = useRef<(() => void) | undefined>(undefined)
 
   useEffect(() => {
     let alive = true
@@ -401,6 +426,46 @@ export function useSessionFeed(
             console.warn(`[dsh-session-monitor] session ${sessionId} context pressure could not be followed`, error)
           }
 
+          /**
+           * Load the whole session, oldest first.
+           *
+           * The binding opens on its newest history page. The flow view draws the
+           * whole session, so this prepends the older pages until the binding
+           * reports the start. A page that adds nothing ends the loop, and so does
+           * leaving the card; the cap keeps a host that keeps claiming `hasMore`
+           * from becoming a request loop.
+           */
+          const loadAllHistory = async (): Promise<void> => {
+            if (typeof face?.loadOlder !== 'function' || stream === undefined) return
+            for (let page = 0; page < MAX_HISTORY_PAGES && alive; page += 1) {
+              let window: EventWindowLike | undefined
+              try {
+                window = stream.getSnapshot?.()
+              } catch {
+                return
+              }
+              if (window?.hasMore !== true) return
+              const before = window.entries?.length ?? 0
+              try {
+                await face.loadOlder()
+              } catch (error) {
+                console.warn(`[dsh-session-monitor] session ${sessionId} could not load older history`, error)
+                return
+              }
+              let after = before
+              try {
+                after = stream.getSnapshot?.()?.entries?.length ?? before
+              } catch {
+                return
+              }
+              if (after <= before) return
+            }
+          }
+          loadAllRef.current = () => {
+            void loadAllHistory()
+          }
+          if (fullHistoryRef.current) loadAllRef.current()
+
           // Reconciliation: local snapshot reads, so a missed notification only
           // delays a mark by one interval instead of leaving it wrong.
           timer = setInterval(publish, RECONCILE_MS)
@@ -414,6 +479,7 @@ export function useSessionFeed(
 
     return () => {
       alive = false
+      loadAllRef.current = undefined
       if (timer !== undefined) clearInterval(timer)
       try {
         stopStream()
@@ -452,6 +518,13 @@ export function useSessionFeed(
       }
     }
   }, [sessionId])
+
+  // A card switched to the flow view after its binding opened needs the older
+  // pages too. The binding is already held, so this only extends the window.
+  useEffect(() => {
+    if (!fullHistory) return
+    loadAllRef.current?.()
+  }, [fullHistory])
 
   return feed
 }

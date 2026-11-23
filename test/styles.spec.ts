@@ -19,13 +19,13 @@ const sources = readdirSync(clientDir)
   .filter((name) => name.endsWith('.tsx'))
   .map((name) => ({ name, text: readFileSync(`${clientDir}${name}`, 'utf8') }))
 
-/** Collect every `dsm-` class token from literal `className` attributes. */
+/** Collect every plugin class token (`dsm-`, `dsf-`) from literal `className` attributes. */
 function usedClasses(): Map<string, string> {
   const used = new Map<string, string>()
   for (const source of sources) {
     for (const match of source.text.matchAll(/className="([^"]+)"/g)) {
       for (const token of (match[1] ?? '').split(/\s+/)) {
-        if (token.startsWith('dsm-')) used.set(token, source.name)
+        if (token.startsWith('dsm-') || token.startsWith('dsf-')) used.set(token, source.name)
       }
     }
   }
@@ -71,6 +71,14 @@ describe('stylesheet', () => {
 
   it('paints the finished-run reminder in the success colour', () => {
     expect(PANEL_CSS).toMatch(/\.dsm-dot\[data-state=completed\]\{[^}]*var\(--dsw-alias-state-success-primary\)/)
+  })
+
+  it('draws the flow view with its own class prefix', () => {
+    // The embedded progress view keeps `dsf-` classes, so the original plugin's
+    // `dsp-` stylesheet cannot reach into a monitor card when both are enabled.
+    expect(PANEL_CSS).toContain('.dsf-root')
+    expect(PANEL_CSS).toContain('.dsf-step')
+    expect(PANEL_CSS).not.toContain('.dsp-')
   })
 
   it('injects under one stable, plugin-owned tag id', () => {
